@@ -5,6 +5,7 @@ import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { newId } from "@/lib/id";
 import { requireSession, requireAdmin } from "@/lib/api-auth";
+import { checkPassword, generatePassword } from "@/lib/password";
 
 const AVATAR_COLORS = ["#1a73e8", "#1e8e3e", "#e37400", "#9334e6", "#d93025", "#12b5cb"];
 
@@ -29,7 +30,19 @@ export async function POST(req: Request) {
   const existing = await db.query.users.findFirst({ where: eq(users.email, email.toLowerCase()) });
   if (existing) return NextResponse.json({ error: "A user with that email already exists." }, { status: 409 });
 
-  const passwordHash = await bcrypt.hash("demo1234", 10);
+  // A generated password, not a shared default.
+  //
+  // This used to hash the literal string "demo1234" for every user it created
+  // — the same password the seed script uses and the README documents. An
+  // admin may supply one; otherwise a random one is generated and returned
+  // ONCE, to be handed over and then changed.
+  const supplied = typeof body.password === "string" ? body.password.trim() : "";
+  if (supplied) {
+    const verdict = checkPassword(supplied, email);
+    if (!verdict.ok) return NextResponse.json({ error: verdict.reason }, { status: 422 });
+  }
+  const tempPassword = supplied || generatePassword();
+  const passwordHash = await bcrypt.hash(tempPassword, 12);
   const id = newId("usr");
   await db.insert(users).values({
     id,
@@ -40,5 +53,10 @@ export async function POST(req: Request) {
     avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
   });
 
-  return NextResponse.json({ id, tempPassword: "demo1234" });
+  return NextResponse.json({
+    id,
+    // Returned once. Cruise stores only the hash, so this cannot be looked up
+    // later — a forgotten password is reset, not recovered.
+    tempPassword: supplied ? null : tempPassword,
+  });
 }

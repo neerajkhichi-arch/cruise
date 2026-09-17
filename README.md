@@ -48,7 +48,14 @@ To wipe and regenerate demo data at any point: `npm run db:reset`.
 
 ### Demo credentials
 
-All seeded users share the password **`demo1234`**.
+`npm run db:seed` gives each seeded user a **different random password** and
+prints them once, at the end of the run. They are not stored anywhere else and
+cannot be looked up later — copy them from the terminal, or reset them from
+Settings → Users & Roles.
+
+Before sharing a deployed URL: change those passwords, or delete the seeded
+accounts and create real ones. A published credential on an install that can
+spend money in a live ad account is the whole ballgame.
 
 | Role | Email | Can do |
 |---|---|---|

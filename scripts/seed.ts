@@ -21,6 +21,7 @@ import {
   metaIntegration,
 } from "../src/lib/db/schema";
 import { newId } from "../src/lib/id";
+import { generatePassword } from "../src/lib/password";
 import { vehiclePerformanceScore, inventoryHealthScore } from "../src/lib/engine/scoring";
 import { DEFAULT_RULE_PARAMS, type RuleType } from "../src/lib/engine/rules";
 import { DEFAULT_NAMING_TEMPLATE } from "../src/lib/engine/naming";
@@ -166,14 +167,33 @@ async function main() {
   // -------------------------------------------------------------------
   // Users
   // -------------------------------------------------------------------
-  const passwordHash = await bcrypt.hash("demo1234", 10);
+  // A DIFFERENT random password per user, printed once.
+  //
+  // This used to hash the literal "demo1234" for all four, which meant every
+  // install of Cruise that had ever been seeded shared one published password
+  // — including one deployed to a public URL. A seed script is allowed to
+  // create convenient accounts; it is not allowed to create a known credential.
   await db.delete(users);
-  await db.insert(users).values([
-    { id: newId("usr"), name: "Aarav Shah", email: "admin@autocampaign.ai", role: "ADMIN", passwordHash, avatarColor: "#2a41e8" },
-    { id: newId("usr"), name: "Meera Kulkarni", email: "manager@autocampaign.ai", role: "MANAGER", passwordHash, avatarColor: "#16a34a" },
-    { id: newId("usr"), name: "Rohan Verma", email: "viewer@autocampaign.ai", role: "VIEWER", passwordHash, avatarColor: "#d97706" },
-    { id: newId("usr"), name: "Priya Nair", email: "priya.nair@autocampaign.ai", role: "MANAGER", passwordHash, avatarColor: "#9333ea" },
-  ]);
+  const people = [
+    { name: "Aarav Shah", email: "admin@autocampaign.ai", role: "ADMIN" as const, avatarColor: "#1a73e8" },
+    { name: "Meera Kulkarni", email: "manager@autocampaign.ai", role: "MANAGER" as const, avatarColor: "#1e8e3e" },
+    { name: "Rohan Verma", email: "viewer@autocampaign.ai", role: "VIEWER" as const, avatarColor: "#e37400" },
+    { name: "Priya Nair", email: "priya.nair@autocampaign.ai", role: "MANAGER" as const, avatarColor: "#9334e6" },
+  ];
+  const issued: { email: string; password: string }[] = [];
+  for (const person of people) {
+    const password = generatePassword();
+    issued.push({ email: person.email, password });
+    await db.insert(users).values({
+      id: newId("usr"),
+      ...person,
+      passwordHash: await bcrypt.hash(password, 12),
+    });
+  }
+
+  console.log("\n  Seeded sign-ins — copy these now, they are not stored anywhere:");
+  for (const row of issued) console.log(`    ${row.email.padEnd(32)} ${row.password}`);
+  console.log("  Change them, or delete the accounts you do not need, before sharing the URL.\n");
 
   // -------------------------------------------------------------------
   // Account-wide settings

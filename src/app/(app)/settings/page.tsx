@@ -166,6 +166,9 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
   const [role, setRole] = useState("VIEWER");
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState("");
+  /** Shown once, right after creating or resetting. Never retrievable again. */
+  const [handover, setHandover] = useState<{ who: string; password: string } | null>(null);
+  const [busy, setBusy] = useState("");
 
   async function invite() {
     setInviting(true);
@@ -174,6 +177,7 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
     const json = await res.json();
     if (!res.ok) setError(json.error);
     else {
+      if (json.tempPassword) setHandover({ who: email, password: json.tempPassword });
       setName("");
       setEmail("");
       refetch();
@@ -182,17 +186,69 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
   }
 
   async function changeRole(id: string, newRole: string) {
-    await fetch(`/api/settings/users/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: newRole }) });
+    setError("");
+    const res = await fetch(`/api/settings/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
+    });
+    if (!res.ok) setError((await res.json()).error ?? "Could not change that role.");
     refetch();
   }
 
+  /** Generate a new password for someone and show it once. */
+  async function resetPassword(id: string, who: string) {
+    setBusy(id);
+    setError("");
+    setHandover(null);
+    const res = await fetch(`/api/settings/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resetPassword: true }),
+    });
+    const json = await res.json();
+    if (!res.ok) setError(json.error ?? "Could not reset that password.");
+    else if (json.tempPassword) setHandover({ who, password: json.tempPassword });
+    setBusy("");
+  }
+
   async function remove(id: string) {
-    await fetch(`/api/settings/users/${id}`, { method: "DELETE" });
+    setError("");
+    const res = await fetch(`/api/settings/users/${id}`, { method: "DELETE" });
+    if (!res.ok) setError((await res.json()).error ?? "Could not remove that user.");
     refetch();
   }
 
   return (
     <div className="space-y-4">
+      <ChangeMyPassword />
+
+      {/* Shown once. Cruise stores only a hash, so this cannot be looked up
+          again — if it is lost, reset it rather than hunting for it. */}
+      {handover && (
+        <div className="card p-5 border-brand-200 bg-brand-50">
+          <h2 className="font-semibold text-ink-900">Password for {handover.who}</h2>
+          <p className="text-sm text-ink-700 mt-1">
+            Copy this now — it is shown once and cannot be retrieved later. Give it to them directly, not over a
+            channel other people can read, and have them change it once they are in.
+          </p>
+          <div className="flex items-center gap-2 mt-3">
+            <code className="flex-1 rounded-lg bg-white border border-ink-200 px-3 py-2 font-mono text-sm">
+              {handover.password}
+            </code>
+            <button
+              className="btn-secondary btn-sm"
+              onClick={() => void navigator.clipboard.writeText(handover.password)}
+            >
+              Copy
+            </button>
+            <button className="btn-ghost btn-sm" onClick={() => setHandover(null)}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
       {isAdmin && (
         <div className="card p-5">
           <h2 className="font-semibold text-ink-900 mb-3">Invite User</h2>
@@ -231,7 +287,15 @@ function UsersTab({ isAdmin }: { isAdmin: boolean }) {
                   )}
                 </td>
                 {isAdmin && (
-                  <td className="text-right">
+                  <td className="text-right whitespace-nowrap">
+                    <button
+                      className="btn-text btn-sm !text-xs"
+                      disabled={busy === u.id}
+                      onClick={() => void resetPassword(u.id, u.email)}
+                      title="Generate a new password for this person"
+                    >
+                      {busy === u.id ? "Resetting…" : "Reset password"}
+                    </button>
                     <button className="btn-ghost !px-1.5 !py-1 text-negative" onClick={() => remove(u.id)}><Trash2 className="h-3.5 w-3.5" /></button>
                   </td>
                 )}
@@ -262,6 +326,80 @@ function Toggle({ label, checked, onChange, disabled }: { label: string; checked
         className={cn("h-5 w-9 rounded-full relative transition-colors", checked ? "bg-brand-600" : "bg-ink-200", disabled && "opacity-60 cursor-not-allowed")}
       >
         <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform", checked ? "translate-x-4" : "translate-x-0.5")} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Changing your own password.
+ *
+ * Available to everyone, not just admins — a Viewer given a generated password
+ * must be able to replace it without asking someone else, or they will write
+ * the generated one on a sticky note, which is where this whole class of
+ * problem starts.
+ */
+function ChangeMyPassword() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  const [done, setDone] = useState("");
+
+  async function submit() {
+    setProblem("");
+    setDone("");
+    if (next !== confirm) {
+      setProblem("The two new passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/account/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+      });
+      const json = await res.json();
+      if (!res.ok) setProblem(json.error ?? "Could not change your password.");
+      else {
+        setDone(json.note ?? "Password changed.");
+        setCurrent("");
+        setNext("");
+        setConfirm("");
+      }
+    } catch {
+      setProblem("Could not reach the server.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="card p-5 max-w-lg space-y-3">
+      <div>
+        <h2 className="font-semibold text-ink-900">Your password</h2>
+        <p className="text-sm text-ink-500 mt-0.5">At least 12 characters. Length matters more than punctuation.</p>
+      </div>
+
+      <div>
+        <label className="label">Current password</label>
+        <input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+      </div>
+      <div>
+        <label className="label">New password</label>
+        <input className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+      </div>
+      <div>
+        <label className="label">New password again</label>
+        <input className="input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      </div>
+
+      {problem && <p className="text-sm text-negative">{problem}</p>}
+      {done && <p className="text-sm text-positive">{done}</p>}
+
+      <button className="btn-primary" onClick={() => void submit()} disabled={busy || !current || !next}>
+        {busy && <Loader2 className="h-4 w-4 animate-spin" />} Change password
       </button>
     </div>
   );

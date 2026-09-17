@@ -15,19 +15,12 @@ import { Sparkles, Loader2 } from "lucide-react";
  * be the one place in the app showing figures nobody can trace.
  */
 
-const DEMO_USERS = [
-  { email: "admin@autocampaign.ai", role: "Admin", desc: "Full access — integrations, billing, all campaigns" },
-  { email: "manager@autocampaign.ai", role: "Marketing Manager", desc: "Create campaigns, set budgets, approve AI recommendations" },
-  { email: "viewer@autocampaign.ai", role: "Viewer", desc: "Read-only dashboards and reports" },
-];
-
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@autocampaign.ai");
-  const [password, setPassword] = useState("demo1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [showDemo, setShowDemo] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -102,39 +95,9 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <p className="text-center text-sm text-ink-700 mt-4">Forgotten your password? Ask an admin to reset it.</p>
-
-            <div className="border-t border-ink-100 my-6" />
-
-            <div className="flex justify-center">
-              <button type="button" className="btn-secondary !py-3 !px-6 font-semibold" onClick={() => setShowDemo((v) => !v)}>
-                {showDemo ? "Hide demo accounts" : "Use a demo account"}
-              </button>
-            </div>
-
-            {showDemo && (
-              <div className="mt-5 space-y-1">
-                <p className="text-xs text-ink-500 px-1 pb-1">Password for all three is demo1234.</p>
-                {DEMO_USERS.map((u) => (
-                  <button
-                    key={u.email}
-                    type="button"
-                    onClick={() => {
-                      setEmail(u.email);
-                      setPassword("demo1234");
-                      setShowDemo(false);
-                    }}
-                    className="w-full text-left rounded-xl px-3 py-2.5 hover:bg-ink-50 transition-colors"
-                  >
-                    <span className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-ink-900">{u.role}</span>
-                      <span className="text-xs text-brand-700">{u.email}</span>
-                    </span>
-                    <span className="block text-xs text-ink-500 mt-0.5">{u.desc}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            <p className="text-center text-sm text-ink-700 mt-4">
+              Forgotten your password? Ask an admin to reset it for you.
+            </p>
           </div>
         </div>
       </div>

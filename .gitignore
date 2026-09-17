@@ -22,3 +22,4 @@ dist
 .DS_Store
 next-env.d.ts
 .vercel
+env-TEMP-DELETE-ME.txt

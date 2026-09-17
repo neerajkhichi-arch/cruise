@@ -86,7 +86,17 @@ one that says "build failed".
 
 ## 5. Check auto-pause is actually scheduled
 
-`vercel.json` schedules `/api/cron/enforce` hourly. Confirm it appears under the
+`vercel.json` schedules `/api/cron/enforce` **daily at 02:00 UTC (07:30 IST)**.
+
+Daily, not hourly, because Vercel's Hobby plan allows only one cron run per day.
+That is a real reduction in protection, not a preference: a city that passes its
+lead target or monthly budget cap can keep spending for up to 24 hours before
+anything stops it. Locally the check ran every 30 minutes.
+
+To get a shorter interval back: Vercel Pro allows hourly (and raises the
+function timeout that bulk-cities needs anyway), or point any external
+scheduler — GitHub Actions is free — at the same URL with the `CRON_SECRET`
+bearer token. The endpoint does not care what calls it. Confirm it appears under the
 project's **Cron Jobs** tab after deploying — the in-process timer that worked
 locally does **not** run on Vercel, so if the schedule is missing, auto-pause
 silently never runs however enabled it looks in the interface.

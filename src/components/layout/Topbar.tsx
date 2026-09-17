@@ -69,7 +69,15 @@ export function Topbar({ user }: { user: { name?: string | null; email?: string 
             {menuOpen && (
               <div className="absolute right-0 mt-1 w-48 rounded-lg border border-ink-100 bg-white shadow-card py-1 z-30">
                 <button
-                  onClick={() => signOut({ callbackUrl: "/login" })}
+                  onClick={() =>
+                    // The origin the person is actually browsing, not the one
+                    // in NEXTAUTH_URL. A misconfigured NEXTAUTH_URL used to
+                    // send whoever signed out to http://localhost — a dead
+                    // page on anyone's machine but the developer's. Where they
+                    // land after signing out should not depend on an
+                    // environment variable being right.
+                    signOut({ callbackUrl: `${window.location.origin}/login` })
+                  }
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-ink-700 hover:bg-ink-50"
                 >
                   <LogOut className="h-4 w-4" /> Sign out

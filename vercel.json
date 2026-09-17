@@ -5,8 +5,9 @@
 
   "crons": [
     {
+      "comment": "Auto-pause sweep. DAILY, not hourly, because Vercel's Hobby plan allows only one run per day — this is a real limitation, not a preference: a city that passes its lead target or budget cap can keep spending for up to 24 hours before this catches it. Pro allows hourly; so does an external scheduler pointed at the same URL.",
       "path": "/api/cron/enforce",
-      "schedule": "0 * * * *"
+      "schedule": "0 2 * * *"
     }
   ]
 }

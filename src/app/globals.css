@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sidebar-w: 248px;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-color: #f8f9fa;
+  color: #202124;
+}
+
+/* Everything below sits in the components layer on purpose.
+   These used to be plain rules written after @tailwind utilities, which meant
+   a component class beat any utility put on the element — so `text-negative`
+   on a .btn-ghost silently lost, and the only way to win was `!`. In the
+   components layer utilities win, which is what the markup has always assumed. */
+@layer components {
+  .card {
+    @apply bg-white rounded-xl border border-ink-100 shadow-card;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  /* Google's status tints: a pale wash of the same hue as the text, never a
+     saturated fill. Written as literals rather than Tailwind's green/red/amber
+     scales so the chips match the CTA palette rather than approximately
+     matching it. */
+  .chip-positive {
+    background-color: #e6f4ea;
+    color: #137333;
+  }
+  .chip-negative {
+    background-color: #fce8e6;
+    color: #c5221f;
+  }
+  .chip-caution {
+    background-color: #fef7e0;
+    color: #b06000;
+  }
+  .chip-neutral {
+    @apply bg-ink-100 text-ink-700;
+  }
+
+  /* Pill-shaped, like every call to action on the reference page. The radius is
+     what makes a Google button read as a Google button; the colour alone does
+     not. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium tracking-[0.01em] transition-all;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40 focus-visible:ring-offset-1;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
+  }
+
+  /* Solid blue, white text. The hover lifts the control rather than darkening
+     it much — #1967d2 is barely a shade down from #1a73e8, and the elevation is
+     doing most of the work. */
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+  }
+  /* The elevation is written out rather than @apply-ing a custom shadow name.
+     A theme key added in the same edit as the CSS that uses it only resolves
+     once Tailwind has re-read its config, and a dev server holding the old one
+     fails the build on a class it cannot see. Plain CSS has no such dependency. */
+  .btn-primary:hover:not(:disabled),
+  .btn-danger:hover:not(:disabled) {
+    box-shadow: 0 1px 3px 0 rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+  }
+
+  /* The "Chat with an expert" button: white fill, blue text, grey hairline,
+     and a pale blue wash on hover. This is the app's neutral button too, which
+     is exactly how Google uses it — the outlined button is not reserved for
+     second-most-important, it is the default shape for anything that is not
+     the one blue action on the screen. */
+  .btn-secondary {
+    @apply btn bg-white text-brand-700 border border-ink-200 hover:bg-brand-50 hover:border-brand-200;
+  }
+
+  /* Blue text button, no chrome until you point at it — Google's third tier of
+     action after solid and outlined. */
+  .btn-text {
+    @apply btn text-brand-700 hover:bg-brand-50;
+  }
+
+  /* Ghost stays grey. Most of its uses in this app are icon-only controls — a
+     close X, pause, a trash can — and Google's icon buttons are grey too;
+     blue is reserved for things that read as actions in words. */
+  .btn-ghost {
+    @apply btn text-ink-700 hover:bg-ink-100;
+  }
+
+  .btn-danger {
+    @apply btn text-white;
+    background-color: #d93025;
+  }
+  .btn-danger:hover {
+    background-color: #c5221f;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5;
+  }
+
+  /* The pale blue announcement strip from the top of the reference page. */
+  .banner-brand {
+    @apply rounded-xl bg-brand-50 text-brand-900 px-4 py-3 text-sm;
+  }
+
+  .table-clean th {
+    @apply text-left text-xs font-semibold uppercase tracking-wide text-ink-400 px-4 py-2.5 border-b border-ink-100;
+  }
+  .table-clean td {
+    @apply px-4 py-3 text-sm text-ink-800 border-b border-ink-100;
+  }
+  .table-clean tr:hover td {
+    @apply bg-ink-50;
+  }
+
+  /* Google marks focus with a second border pixel in blue, not a glow. */
+  .input {
+    @apply w-full rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400;
+    @apply focus:outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600;
+  }
+  .label {
+    @apply block text-xs font-medium text-ink-500 mb-1;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 8px;
+}
+
+/* Number spinners on money fields are a nuisance: the arrows sit under the
+   cursor, a stray scroll changes a budget without anyone touching the
+   keyboard, and they crowd the field. Typed entry only. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

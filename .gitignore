@@ -1,0 +1,24 @@
+# Dependencies and build output
+node_modules
+.next
+out
+dist
+
+# Secrets.
+#
+# `.env.*` catches every variant — .env.save, .env.bak.2026…, .env.backup-…,
+# .env.production — because the old list only caught `.env` itself and six
+# files holding a live Meta access token were staged for the first commit.
+# A committed token is a rotated token, and git history keeps it after deletion.
+.env
+.env.*
+!.env.example
+
+# Local database files, including the retired SQLite build.
+*.db
+*.db-journal
+
+# OS and editor noise
+.DS_Store
+next-env.d.ts
+.vercel

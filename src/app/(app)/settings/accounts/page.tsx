@@ -45,6 +45,15 @@ interface Available {
   access: string;
 }
 
+/** Conversion actions this account really reported, for the lead-event picker. */
+interface LeadEvents {
+  since: string;
+  until: string;
+  current: string | null;
+  notes: string[];
+  candidates: { actionType: string; label: string; count: number; likelyLead: boolean }[];
+}
+
 /** What the token may actually do with a connected account. */
 interface Access {
   reachable: boolean;
@@ -67,6 +76,30 @@ export default function AccountsPage() {
   const [problem, setProblem] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<Connected>>({});
+
+  // What this account actually reports as a conversion, fetched on demand.
+  // Typing the lead event from memory has no error state - a wrong value reads
+  // as "no leads this month", which is why this exists.
+  const [detecting, setDetecting] = useState(false);
+  const [detected, setDetected] = useState<LeadEvents | null>(null);
+  const [detectError, setDetectError] = useState("");
+
+  async function detect(accountId: string) {
+    setDetecting(true);
+    setDetectError("");
+    setDetected(null);
+    try {
+      const res = await fetch(`/api/accounts/lead-events?account=${encodeURIComponent(accountId)}`, {
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (!res.ok) setDetectError(json.error ?? "Could not read this account's events.");
+      else setDetected(json as LeadEvents);
+    } catch {
+      setDetectError("Could not reach the server.");
+    }
+    setDetecting(false);
+  }
 
   const connected = data?.connected ?? [];
   const available = useMemo(() => {
@@ -222,8 +255,19 @@ export default function AccountsPage() {
                       Only for accounts running catalogue ads. Empty hides Vehicles for this account.
                     </p>
                   </div>
-                  <div>
-                    <label className="label">Lead pixel event</label>
+                  <div className="sm:col-span-2">
+                    <div className="flex items-end justify-between gap-2">
+                      <label className="label">Lead event</label>
+                      <button
+                        type="button"
+                        className="btn-text !text-xs !py-0.5"
+                        onClick={() => void detect(a.id)}
+                        disabled={detecting}
+                      >
+                        <RefreshCw className={cn("h-3.5 w-3.5", detecting && "animate-spin")} />
+                        {detecting ? "Reading Meta..." : "Show what this account reports"}
+                      </button>
+                    </div>
                     <input
                       className="input"
                       placeholder="UCR_Lead_Submit_New"
@@ -233,9 +277,47 @@ export default function AccountsPage() {
                     <p className="text-xs text-ink-500 mt-1">
                       The pixel event this account fires on a lead. Every lead and CPL figure for this account counts
                       this event and nothing else, so if it is wrong the dashboard shows spend, clicks and impressions
-                      normally and zero leads. Empty falls back to the default in .env &mdash; CarDekho&apos;s used-car
+                      normally and zero leads. A bare name is treated as a custom pixel event; a value containing a
+                      dot is used exactly as written, which is how lead forms (leadgen.other) and the standard pixel
+                      Lead event are set. Empty falls back to the default in .env &mdash; CarDekho&apos;s used-car
                       event, which does not fire on the other accounts.
                     </p>
+
+                    {detectError && <p className="text-xs text-negative mt-2">{detectError}</p>}
+
+                    {detected && (
+                      <div className="mt-2 rounded-lg border border-ink-200 p-3">
+                        <p className="text-xs text-ink-500">
+                          Reported between {detected.since} and {detected.until}. Click one to use it.
+                        </p>
+                        {detected.notes.map((n, i) => (
+                          <p key={i} className="text-xs text-caution mt-1.5 leading-relaxed">
+                            {n}
+                          </p>
+                        ))}
+                        <div className="mt-2 space-y-1">
+                          {detected.candidates.map((cand) => (
+                            <button
+                              key={cand.actionType}
+                              type="button"
+                              onClick={() => setDraft({ ...draft, conversionEvent: cand.actionType })}
+                              className="w-full text-left rounded-md px-2 py-1.5 hover:bg-ink-50 flex items-center justify-between gap-3"
+                            >
+                              <span className="min-w-0">
+                                <span className="block text-sm text-ink-800 truncate">{cand.label}</span>
+                                <span className="block text-[11px] text-ink-400 font-mono truncate">
+                                  {cand.actionType}
+                                </span>
+                              </span>
+                              <span className="shrink-0 flex items-center gap-2">
+                                {cand.likelyLead && <span className="chip chip-positive !text-[10px]">likely lead</span>}
+                                <span className="text-xs text-ink-500 tabular-nums">{cand.count.toLocaleString()}</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="sm:col-span-2">
                     <label className="label">Lead targets sheet (published CSV)</label>

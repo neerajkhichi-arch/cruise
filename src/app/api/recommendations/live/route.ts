@@ -22,9 +22,10 @@ export async function GET(req: Request) {
   }
 
   try {
-    const result = await buildRecommendations(
-      account.id
-    );
+    // This account's own lead-target sheet. Passing nothing used to fall
+    // through to the environment's, so every account's budget ceiling was
+    // CarDekho's.
+    const result = await buildRecommendations(account.id, account.leadTargetsCsvUrl);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(

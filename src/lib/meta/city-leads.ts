@@ -43,9 +43,28 @@ export function leadEventName(): string {
   return currentConversionEvent() || process.env.META_CONVERSION_EVENT?.trim() || CONVERSION_EVENT;
 }
 
-/** The action Meta reports for this account's website lead event. */
+/**
+ * The action_type Meta reports for this account's lead.
+ *
+ * A bare name is a CUSTOM pixel event and gets the custom-event prefix, which
+ * is what CarDekho's used-car setup uses. But that is one of several shapes a
+ * lead takes, and assuming it was the second half of the zero-leads bug:
+ *
+ *   - a custom pixel event          -> offsite_conversion.fb_pixel_custom.NAME
+ *   - the STANDARD pixel lead event -> offsite_conversion.fb_pixel_lead
+ *   - an on-Facebook instant form   -> leadgen.other
+ *
+ * The Media Sales and Dekho accounts do not all use the first. Prefixing a
+ * standard or lead-form action type produces a string that matches nothing, and
+ * "matches nothing" renders as a lead count of zero rather than as an error -
+ * indistinguishable from a campaign that genuinely got no leads.
+ *
+ * So: anything containing a dot is already a full action_type and is used
+ * verbatim. Only a bare name is treated as a custom pixel event.
+ */
 export function leadActionType(): string {
-  return `offsite_conversion.fb_pixel_custom.${leadEventName()}`;
+  const configured = leadEventName();
+  return configured.includes(".") ? configured : `offsite_conversion.fb_pixel_custom.${configured}`;
 }
 
 export interface CityLeadCount {

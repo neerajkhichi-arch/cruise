@@ -96,7 +96,18 @@ function stats(since: string, until: string, spend: number, leads: number): Wind
   return { since, until, spend: round(spend), leads, cpl: leads > 0 ? spend / leads : 0 };
 }
 
-export async function buildRecommendations(adAccountId: string, now = new Date()): Promise<RecommendationResult> {
+/**
+ * @param leadTargetsCsvUrl this account's own sheet, or null when it has none.
+ * It is a required argument rather than an optional one because the default
+ * used to be the environment's sheet - CarDekho's - so recommendations for
+ * BikeDekho were capped by used-car monthly budgets. An account with no sheet
+ * gets recommendations with no monthly ceiling, which is the honest answer.
+ */
+export async function buildRecommendations(
+  adAccountId: string,
+  leadTargetsCsvUrl: string | null,
+  now = new Date()
+): Promise<RecommendationResult> {
   const today = todayInAccountTz(now);
   // Both windows end YESTERDAY. Today is partial, and a half-day of delivery
   // looks like a collapse in cost per lead if you let it into an average.
@@ -110,7 +121,7 @@ export async function buildRecommendations(adAccountId: string, now = new Date()
     getLiveCampaignMetrics(adAccountId, { since: baselineSince, until }),
     getLiveCampaignMetrics(adAccountId, { since: recentSince, until }),
     getCityLeadsThisMonth(adAccountId, month),
-    fetchLeadTargets().catch(() => null),
+    fetchLeadTargets(leadTargetsCsvUrl).catch(() => null),
   ]);
 
   const recentById = new Map(recentRows.campaigns.map((c) => [c.campaignId, c]));

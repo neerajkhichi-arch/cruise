@@ -47,6 +47,11 @@ function pct(v: number | null): number | null {
 export function BudgetTargetBand() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Distinguished from a failure. An account with no sheet is a setup state,
+  // not a fault, and colouring it as a warning trains people to ignore the
+  // colour. It used to be neither: a missing sheet fell back to CarDekho's, so
+  // used-car targets and budgets appeared under every account's name.
+  const [needsSheet, setNeedsSheet] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,8 +59,10 @@ export function BudgetTargetBand() {
       .then(async (r) => {
         const body = await r.json();
         if (cancelled) return;
-        if (!r.ok) setError(body.error ?? "Could not read budgets.");
-        else setData(body as Payload);
+        if (!r.ok) {
+          setNeedsSheet(body.needsSheet === true);
+          setError(body.error ?? "Could not read budgets.");
+        } else setData(body as Payload);
       })
       .catch(() => {
         if (!cancelled) setError("Could not reach the server.");
@@ -71,7 +78,12 @@ export function BudgetTargetBand() {
         <p className="font-semibold text-ink-900 dark:text-ink-50 flex items-center gap-2">
           <Wallet className="h-4 w-4" /> Budgets and targets
         </p>
-        <p className="text-sm text-caution mt-1.5">{error}</p>
+        <p className={cn("text-sm mt-1.5 leading-relaxed", needsSheet ? "text-ink-500" : "text-caution")}>{error}</p>
+        {needsSheet && (
+          <Link href="/settings/accounts" className="text-sm text-brand-700 hover:underline mt-2 inline-block">
+            Set a lead-target sheet for this account
+          </Link>
+        )}
       </div>
     );
   }

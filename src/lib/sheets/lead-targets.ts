@@ -278,11 +278,26 @@ export function toCsvUrl(url: string): string | null {
   return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
 }
 
-export async function fetchLeadTargets(rawUrl?: string): Promise<LeadTargetsResult> {
-  const configured = rawUrl?.trim() || process.env.LEAD_TARGETS_CSV_URL?.trim();
+/**
+ * The sheet for ONE ad account.
+ *
+ * The URL is required. It used to fall back to LEAD_TARGETS_CSV_URL when a
+ * caller passed nothing, which was fine on a single-account install and
+ * actively wrong once there were five: an account with no sheet of its own
+ * silently inherited CarDekho's used-car targets and monthly budgets, and the
+ * Executive Dashboard showed those numbers under every account's name. A
+ * missing sheet has to read as missing.
+ *
+ * The environment value is not lost - lib/accounts.ts seeds it onto the ad
+ * account it actually belongs to, so that account still finds it here.
+ */
+export async function fetchLeadTargets(rawUrl?: string | null): Promise<LeadTargetsResult> {
+  const configured = rawUrl?.trim();
   if (!configured) {
     throw new Error(
-      "No lead-target sheet configured. Publish the sheet (File → Share → Publish to web → CSV) and put the URL in LEAD_TARGETS_CSV_URL."
+      "This ad account has no lead-target sheet. Targets and monthly budgets are set per account, so there is " +
+        "nothing to enforce or report against until one is given. Publish the sheet (File → Share → Publish to web " +
+        "→ CSV) and paste the URL against this account in Settings → Ad accounts."
     );
   }
   const url = toCsvUrl(configured);

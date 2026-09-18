@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireEditor, requireSession } from "@/lib/api-auth";
-import { GraphError, graphPost } from "@/lib/meta/graph";
+import { requireAccount, requireAccountEditor } from "@/lib/api-auth";
+import { GraphError, graphGet, graphPost } from "@/lib/meta/graph";
 import { getCityLeadsThisMonth } from "@/lib/meta/city-leads";
 import { fetchLeadTargets } from "@/lib/sheets/lead-targets";
 import { dayCount, rangeFromParams, todayInAccountTz } from "@/lib/date-range";
-import { resolveAccountId } from "@/lib/accounts";
 
 /**
  * City lead targets: the sheet's numbers against Meta's.
@@ -16,10 +15,6 @@ import { resolveAccountId } from "@/lib/accounts";
  *
  * POST pauses, and only when asked, naming a specific city.
  */
-
-async function adAccountId(req: Request): Promise<string> {
-  return resolveAccountId(req);
-}
 
 function liveReasons(): string[] {
   const reasons: string[] = [];
@@ -58,7 +53,11 @@ export interface CityTargetRow {
 }
 
 export async function GET(req: Request) {
-  const { error } = await requireSession();
+  // requireAccount rather than requireSession: the targets belong to ONE ad
+  // account, and reading them used to resolve the account with no viewer at
+  // all - so a Manager could read another client's targets by hand-editing
+  // ?account=.
+  const { account, error } = await requireAccount(req);
   if (error) return error;
 
   const blocked = liveReasons();
@@ -71,10 +70,17 @@ export async function GET(req: Request) {
 
   let sheet;
   try {
-    sheet = await fetchLeadTargets();
+    // This account's sheet, never the environment's. Passing nothing here fell
+    // back to LEAD_TARGETS_CSV_URL, which is CarDekho's used-car sheet - every
+    // other account showed those targets and budgets as its own.
+    sheet = await fetchLeadTargets(account.leadTargetsCsvUrl);
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err), needsSheet: true },
+      {
+        error: err instanceof Error ? err.message : String(err),
+        needsSheet: true,
+        account: { id: account.id, name: account.name },
+      },
       { status: 409 }
     );
   }
@@ -85,7 +91,7 @@ export async function GET(req: Request) {
 
   let actuals;
   try {
-    actuals = await getCityLeadsThisMonth(await adAccountId(req), { since: range.since, until: range.until });
+    actuals = await getCityLeadsThisMonth(account.id, { since: range.since, until: range.until });
   } catch (err) {
     const message = err instanceof GraphError ? err.describe() : err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 502 });
@@ -198,7 +204,11 @@ interface PauseBody {
 }
 
 export async function POST(req: Request) {
-  const { error } = await requireEditor();
+  // requireAccountEditor, not requireEditor: this pauses live campaigns, and
+  // the previous check asked only "is this person allowed to edit SOMETHING".
+  // A campaign id is just a number in a JSON body, so any Manager could have
+  // stopped spend in an account they were never granted by sending its id.
+  const { account, error } = await requireAccountEditor(req);
   if (error) return error;
 
   if (liveReasons().length > 0) {
@@ -219,6 +229,17 @@ export async function POST(req: Request) {
 
   for (const campaignId of ids) {
     try {
+      // Confirm the campaign is in THIS account before touching it. The id
+      // arrived in a request body; being well-formed says nothing about whose
+      // it is. One indexed read against a mistake that stops a client's spend.
+      const owner = await graphGet<{ account_id?: string }>(campaignId, { fields: "account_id" });
+      if ((owner.account_id ?? "").replace(/^act_/, "") !== account.id) {
+        failed.push({
+          campaignId,
+          error: `Campaign ${campaignId} does not belong to ${account.name}, so it was not touched.`,
+        });
+        continue;
+      }
       await graphPost(campaignId, { status: "PAUSED" });
       paused.push(campaignId);
     } catch (err) {

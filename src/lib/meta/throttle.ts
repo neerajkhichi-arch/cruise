@@ -30,8 +30,17 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { metaCooldowns } from "../db/schema";
 
-/** How long to leave an account alone after it reports a rate limit. */
+/** The least time to leave an account alone, when Meta gives no estimate. */
 const COOLDOWN_MS = 5 * 60 * 1000;
+
+/**
+ * The most, however long Meta asks for.
+ *
+ * A ceiling because the estimate is Meta's, arrives in a header, and a bad
+ * parse or an outlier should not take an account offline for a working day.
+ * An hour is long enough for any real window to pass.
+ */
+const MAX_COOLDOWN_MS = 60 * 60 * 1000;
 
 /**
  * How long a DB answer is trusted before being read again.
@@ -58,9 +67,13 @@ const memo = new Map<string, Memo>();
  * costs one instance's worth of extra calls, while throwing here would replace
  * a rate-limit error with a database error and hide what actually happened.
  */
-export function noteRateLimited(accountId: string | null, reason?: string): void {
+export function noteRateLimited(accountId: string | null, reason?: string, windowMs?: number): void {
   if (!accountId) return;
-  const until = Date.now() + COOLDOWN_MS;
+  // Meta's own estimate when it gave one, never shorter than the minimum and
+  // never longer than the cap. A flat guess was the reason an account that
+  // needed an hour got poked every five minutes and never recovered.
+  const wait = Math.min(MAX_COOLDOWN_MS, Math.max(COOLDOWN_MS, windowMs ?? 0));
+  const until = Date.now() + wait;
   memo.set(accountId, { until, checkedAt: Date.now() });
 
   void db

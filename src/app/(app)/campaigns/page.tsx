@@ -163,8 +163,14 @@ export default function CampaignsPage() {
 
       {data?.sourceError && (
         <div className="rounded-xl border border-negative/40 bg-negative/5 p-3.5">
-          <p className="text-sm font-semibold text-negative">Meta could not be read — showing local records instead</p>
+          {/* It no longer shows local records - the table below is empty on
+              purpose. The old wording outlived the behaviour by one deploy. */}
+          <p className="text-sm font-semibold text-negative">Meta could not be read</p>
           <p className="text-xs text-ink-700 dark:text-ink-200 mt-1">{data.sourceError}</p>
+          <p className="text-xs text-ink-500 mt-1.5">
+            The table below is empty because this account could not be read, not because it has no campaigns. Nothing
+            from another account is shown in its place.
+          </p>
         </div>
       )}
 

@@ -221,9 +221,56 @@ export function isRateLimitError(err: unknown): boolean {
  * matter which read tripped it - including one added tomorrow by someone who
  * has never heard of throttle.ts.
  */
-function fail(path: string, payload: Record<string, unknown>, body: Record<string, unknown>): never {
+/**
+ * How long Meta says this ad account needs, in minutes.
+ *
+ * Meta returns its own rate-limit accounting on every response, in
+ * `x-business-use-case-usage` (and `x-ad-account-usage` on older paths). The
+ * useful field is `estimated_time_to_regain_access`, in MINUTES.
+ *
+ * Reading it matters more than it sounds. The cooling-off window was a flat
+ * five minutes, which was a guess - and when Meta wants an hour, a five-minute
+ * window means the app waits, retries into a still-closed door, gets refused,
+ * and starts another five minutes. From the outside that is indistinguishable
+ * from being permanently broken, which is exactly what BikeDekho looked like
+ * all afternoon. Meta was saying how long the whole time.
+ *
+ * Returns 0 when the header is absent or unparseable, which is not an error -
+ * the caller falls back to its own minimum.
+ */
+function estimatedMinutesToRegainAccess(res: Response): number {
+  for (const header of ["x-business-use-case-usage", "x-ad-account-usage"]) {
+    const raw = res.headers.get(header);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      // Keyed by business or account id, each holding an array of entries.
+      const entries: unknown[] =
+        Array.isArray(parsed) ? parsed : Object.values(parsed as Record<string, unknown>).flat();
+      let worst = 0;
+      for (const entry of entries) {
+        const minutes = Number((entry as { estimated_time_to_regain_access?: unknown })?.estimated_time_to_regain_access);
+        if (Number.isFinite(minutes) && minutes > worst) worst = minutes;
+      }
+      if (worst > 0) return worst;
+    } catch {
+      /* a header we do not understand is not a reason to fail the call */
+    }
+  }
+  return 0;
+}
+
+function fail(
+  path: string,
+  payload: Record<string, unknown>,
+  body: Record<string, unknown>,
+  res?: Response
+): never {
   const err = new GraphError(path, payload, (body.error ?? { message: "Graph API call failed" }) as never);
-  if (isRateLimitError(err)) noteRateLimited(currentAccountId(), err.message);
+  if (isRateLimitError(err)) {
+    const minutes = res ? estimatedMinutesToRegainAccess(res) : 0;
+    noteRateLimited(currentAccountId(), err.message, minutes > 0 ? minutes * 60_000 : undefined);
+  }
   throw err;
 }
 
@@ -243,7 +290,7 @@ export async function graphPost<T = { id: string }>(
     error?: ConstructorParameters<typeof GraphError>[2];
   };
   if (!res.ok || body.error) {
-    fail(path, payload, { error: body.error ?? { message: `HTTP ${res.status}` } });
+    fail(path, payload, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
   return body as T;
 }
@@ -258,7 +305,7 @@ export async function graphGet<T = Record<string, unknown>>(
     error?: ConstructorParameters<typeof GraphError>[2];
   };
   if (!res.ok || body.error) {
-    fail(path, params, { error: body.error ?? { message: `HTTP ${res.status}` } });
+    fail(path, params, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
   return body as T;
 }
@@ -268,7 +315,7 @@ export async function graphDelete(path: string): Promise<void> {
   const res = await fetch(`${GRAPH_BASE}/${path}?${qs.toString()}`, { method: "DELETE" });
   const body = (await res.json().catch(() => ({}))) as { error?: ConstructorParameters<typeof GraphError>[2] };
   if (!res.ok || body.error) {
-    fail(path, {}, { error: body.error ?? { message: `HTTP ${res.status}` } });
+    fail(path, {}, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
 }
 

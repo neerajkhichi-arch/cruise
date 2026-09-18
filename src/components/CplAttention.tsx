@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { AlertTriangle, ChevronDown, RefreshCw, TrendingUp } from "lucide-react";
 import { cn, inr } from "@/lib/format";
 
@@ -85,13 +85,18 @@ export function CplAttention() {
     setBusy(false);
   }, []);
 
-  useEffect(() => {
+  // NOT loaded on mount, deliberately.
+  //
+  // This costs two paginated sweeps, of a 7-day and a 90-day window. Auto-
+  // running it on every visit to the Campaigns screen added that to an account
+  // already oscillating in and out of its own rate limit - the check meant to
+  // find problems was making one. It runs when somebody asks for it, which is
+  // also when the answer is wanted.
+  const [started, setStarted] = useState(false);
+  const run = useCallback(() => {
+    setStarted(true);
     void load();
   }, [load]);
-
-  // Nothing to say and nothing wrong: stay off the screen rather than adding a
-  // green box that has to be read to be dismissed.
-  if (!data && !error && !busy) return null;
 
   return (
     <div className="card p-5">
@@ -100,10 +105,19 @@ export function CplAttention() {
           <TrendingUp className="h-4 w-4 text-brand-600" />
           <h2 className="font-semibold text-ink-900 dark:text-ink-50">Needs attention</h2>
         </div>
-        <button className="btn-secondary btn-sm !text-xs" onClick={() => void load()} disabled={busy}>
-          <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} /> Refresh
+        <button className="btn-secondary btn-sm !text-xs" onClick={run} disabled={busy}>
+          <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
+          {busy ? "Reading Meta..." : started ? "Refresh" : "Check"}
         </button>
       </div>
+
+      {!started && !data && (
+        <p className="text-xs text-ink-500 mt-1 max-w-2xl leading-relaxed">
+          Compares the last week against each campaign&apos;s own previous three months, and raises only the ones
+          paying more per result at unchanged spend &mdash; a rise a budget cut explains is not a finding. Two reads of
+          Meta, so it runs when you ask rather than on every visit.
+        </p>
+      )}
 
       {data && (
         <p className="text-xs text-ink-500 mt-1">

@@ -260,16 +260,30 @@ function estimatedMinutesToRegainAccess(res: Response): number {
   return 0;
 }
 
-function fail(
+/**
+ * Raise a Graph failure, recording a rate limit against the current account.
+ *
+ * ASYNC, and awaited by every caller, for a reason that cost most of a day:
+ * this runs on Vercel, where a serverless function can be frozen the moment its
+ * response is sent. A floating promise started here - `void db.insert(...)` -
+ * is not guaranteed to reach Postgres before that happens. So the cooling-off
+ * row was being written on a developer machine and, often, not in production:
+ * the breaker looked correct, logged nothing, and let every instance keep
+ * calling a blocked account.
+ *
+ * Awaiting it costs one write on a request that has already failed, and makes
+ * the window real.
+ */
+async function fail(
   path: string,
   payload: Record<string, unknown>,
   body: Record<string, unknown>,
   res?: Response
-): never {
+): Promise<never> {
   const err = new GraphError(path, payload, (body.error ?? { message: "Graph API call failed" }) as never);
   if (isRateLimitError(err)) {
     const minutes = res ? estimatedMinutesToRegainAccess(res) : 0;
-    noteRateLimited(currentAccountId(), err.message, minutes > 0 ? minutes * 60_000 : undefined);
+    await noteRateLimited(currentAccountId(), err.message, minutes > 0 ? minutes * 60_000 : undefined);
   }
   throw err;
 }
@@ -290,7 +304,7 @@ export async function graphPost<T = { id: string }>(
     error?: ConstructorParameters<typeof GraphError>[2];
   };
   if (!res.ok || body.error) {
-    fail(path, payload, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
+    await fail(path, payload, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
   return body as T;
 }
@@ -305,7 +319,7 @@ export async function graphGet<T = Record<string, unknown>>(
     error?: ConstructorParameters<typeof GraphError>[2];
   };
   if (!res.ok || body.error) {
-    fail(path, params, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
+    await fail(path, params, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
   return body as T;
 }
@@ -315,7 +329,7 @@ export async function graphDelete(path: string): Promise<void> {
   const res = await fetch(`${GRAPH_BASE}/${path}?${qs.toString()}`, { method: "DELETE" });
   const body = (await res.json().catch(() => ({}))) as { error?: ConstructorParameters<typeof GraphError>[2] };
   if (!res.ok || body.error) {
-    fail(path, {}, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
+    await fail(path, {}, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
 }
 

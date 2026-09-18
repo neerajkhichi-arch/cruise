@@ -61,13 +61,16 @@ const memo = new Map<string, Memo>();
 /**
  * Record that Meta pushed back on this account.
  *
- * Synchronous by signature, because it is called from the Graph error path,
- * which cannot await. Memory is updated at once so THIS instance stops
- * immediately; the shared write follows and is allowed to fail — losing it
- * costs one instance's worth of extra calls, while throwing here would replace
- * a rate-limit error with a database error and hide what actually happened.
+ * Memory is updated first so THIS instance stops immediately even if the shared
+ * write fails; the write itself is awaited but swallowed on error, because
+ * throwing here would replace a rate-limit error with a database error and hide
+ * what actually happened.
  */
-export function noteRateLimited(accountId: string | null, reason?: string, windowMs?: number): void {
+export async function noteRateLimited(
+  accountId: string | null,
+  reason?: string,
+  windowMs?: number
+): Promise<void> {
   if (!accountId) return;
   // Meta's own estimate when it gave one, never shorter than the minimum and
   // never longer than the cap. A flat guess was the reason an account that
@@ -76,7 +79,11 @@ export function noteRateLimited(accountId: string | null, reason?: string, windo
   const until = Date.now() + wait;
   memo.set(accountId, { until, checkedAt: Date.now() });
 
-  void db
+  // AWAITED, not fire-and-forget. On Vercel the function can be frozen as soon
+  // as the response is sent, so a floating promise here often never reached
+  // Postgres - the breaker recorded nothing in production while working
+  // perfectly in development.
+  await db
     .insert(metaCooldowns)
     .values({ accountId, until: new Date(until), reason: reason ?? null, noticedAt: new Date() })
     .onConflictDoUpdate({

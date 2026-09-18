@@ -188,8 +188,30 @@ export async function getLiveCampaignMetrics(
     const resultType = resultTypeFor(dominant?.optimization_goal, dominant?.promoted_object);
     const attributionSetting = (ins?.attribution_setting as AttributionSetting) || attributionFor(dominant?.attribution_spec);
 
+    // --- results, counted by what THIS campaign optimises for --------------
+    //
+    // The result type was already worked out above, from the ad set's own
+    // optimisation goal - and then ignored, because every campaign's result was
+    // counted against one account-wide pixel event. A lead form does not report
+    // a pixel event and a messaging campaign does not either, so on an account
+    // mixing all three, two of them read zero while Ads Manager showed
+    // hundreds. The classification was right there; nothing used it.
     const all = [...(ins?.conversions ?? []), ...(ins?.actions ?? [])];
-    const leads = Number(all.find((x) => x.action_type === action)?.value ?? 0) || 0;
+    const countOf = (type: string) => Number(all.find((x) => x.action_type === type)?.value ?? 0) || 0;
+    const leads =
+      resultType === "LEAD_FORM"
+        ? // On-Facebook instant forms. Older accounts report the grouped
+          // on-site action instead, so both are accepted and the larger taken -
+          // they are the same leads counted under two names, never additive.
+          Math.max(countOf("leadgen.other"), countOf("onsite_conversion.lead_grouped"))
+        : resultType === "MESSAGING"
+          ? Math.max(
+              countOf("onsite_conversion.messaging_conversation_started_7d"),
+              countOf("onsite_conversion.total_messaging_connection")
+            )
+          : // A website conversion, which is the only case where the account's
+            // configured lead event applies.
+            countOf(action);
     const spend = n(ins?.spend);
     const impressions = n(ins?.impressions);
     const clicks = n(ins?.clicks);

@@ -32,6 +32,8 @@ interface AdSetRow {
   id: string;
   name: string;
   status: string;
+  /** What Meta actually delivers against - an ad set can be ACTIVE under a paused campaign. */
+  effective_status?: string;
   campaign_id: string;
   daily_budget?: string;
   optimization_goal?: string;
@@ -183,6 +185,23 @@ export async function getLiveCampaignMetrics(
     const stage: FunnelStage | "MIXED" =
       stages.size === 1 ? [...stages][0] : stages.size === 0 ? "PROSPECTING" : "MIXED";
 
+    // --- is it actually running? -------------------------------------------
+    //
+    // `status` is the campaign's own switch and nothing more. These two are
+    // different questions, and conflating them is why a filter for active
+    // campaigns returned rows named _280421_ with no spend since 2021: the
+    // campaign was still switched on, every ad set under it was not.
+    const activeAdSets = sets.filter((a) => (a.effective_status ?? a.status) === "ACTIVE").length;
+    const campaignOff =
+      c.status !== "ACTIVE" || ["PAUSED", "ARCHIVED", "DELETED"].includes(c.effective_status ?? "");
+    const delivery: "DELIVERING" | "NO_DELIVERY" | "NO_ACTIVE_ADSETS" | "OFF" = campaignOff
+      ? "OFF"
+      : activeAdSets === 0
+        ? "NO_ACTIVE_ADSETS"
+        : n(ins?.impressions) > 0
+          ? "DELIVERING"
+          : "NO_DELIVERY";
+
     // --- cohort, from the ad set that spends the most ----------------------
     const dominant = sets[0];
     const resultType = resultTypeFor(dominant?.optimization_goal, dominant?.promoted_object);
@@ -217,6 +236,8 @@ export async function getLiveCampaignMetrics(
       campaignId: c.id,
       name: c.name,
       status: c.status,
+      delivery,
+      activeAdSets,
       cities,
       stage,
       resultType,

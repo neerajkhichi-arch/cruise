@@ -126,6 +126,22 @@ export interface CampaignMetrics {
   cities: string[];
   /** Derived from ad set settings, never from `name`. */
   stage: FunnelStage | "MIXED";
+  /**
+   * Whether this campaign is actually running, as opposed to merely switched on.
+   *
+   * Meta's `status` is only the campaign's own toggle. A campaign can sit at
+   * ACTIVE for years with every ad set beneath it paused - Ads Manager shows
+   * those as not delivering, this app showed them as ACTIVE, and a filter for
+   * "active campaigns" returned hundreds of 2021 campaigns with no spend.
+   *
+   *   DELIVERING       on, has a live ad set, and served in this range
+   *   NO_DELIVERY      on with a live ad set, but nothing served in the range
+   *   NO_ACTIVE_ADSETS on, and nothing beneath it is running
+   *   OFF              the campaign itself is paused, archived or deleted
+   */
+  delivery?: "DELIVERING" | "NO_DELIVERY" | "NO_ACTIVE_ADSETS" | "OFF";
+  /** Ad sets under this campaign whose effective status is ACTIVE. */
+  activeAdSets?: number;
   resultType: ResultType;
   /**
    * The Meta action_type this campaign's results were counted from.

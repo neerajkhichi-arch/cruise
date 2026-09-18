@@ -16,6 +16,9 @@ interface CampaignRow {
   campaignId: string;
   name: string;
   status: string;
+  /** Whether it is running, not merely switched on. See lib/meta/campaign-insights.ts. */
+  delivery?: "DELIVERING" | "NO_DELIVERY" | "NO_ACTIVE_ADSETS" | "OFF";
+  activeAdSets?: number;
   cities: string[];
   dailyBudget: number;
   spend: number;
@@ -122,12 +125,24 @@ export default function CampaignsPage() {
   const allCampaigns = data?.campaigns ?? [];
   // Counts come from everything fetched, not from what is on screen, so the
   // toggle can say how many it would show before it is pressed.
+  //
+  // "Active" means RUNNING, not merely switched on. Meta's `status` is the
+  // campaign's own toggle; a campaign can sit at ACTIVE with every ad set
+  // beneath it paused, which Ads Manager shows as not delivering. Filtering on
+  // `status` alone put hundreds of 2021 campaigns with no spend under Active.
+  const isRunning = (c: CampaignRow) => c.delivery === "DELIVERING" || c.delivery === "NO_DELIVERY";
+  const isStopped = (c: CampaignRow) => !isRunning(c);
   const counts = {
     ALL: allCampaigns.length,
-    ACTIVE: allCampaigns.filter((c) => c.status === "ACTIVE").length,
-    PAUSED: allCampaigns.filter((c) => c.status === "PAUSED").length,
+    ACTIVE: allCampaigns.filter(isRunning).length,
+    PAUSED: allCampaigns.filter(isStopped).length,
   };
-  const campaigns = status ? allCampaigns.filter((c) => c.status === status) : allCampaigns;
+  const campaigns =
+    status === "ACTIVE"
+      ? allCampaigns.filter(isRunning)
+      : status === "PAUSED"
+        ? allCampaigns.filter(isStopped)
+        : allCampaigns;
 
   return (
     <div className="space-y-4">
@@ -258,7 +273,20 @@ export default function CampaignsPage() {
                   <Link href={`/campaigns/${c.campaignId}`} className="font-medium text-ink-800 hover:text-brand-600">{c.name}</Link>
                 </td>
                 <td className="text-ink-500 align-top"><CityList cities={c.cities} /></td>
-                <td><StatusChip status={c.status} /></td>
+                <td>
+                  <StatusChip status={c.status} />
+                  {/* The campaign's switch and what it is actually doing are
+                      different facts. Naming the second one here is what stops
+                      "ACTIVE" meaning two things at once. */}
+                  {c.delivery === "NO_ACTIVE_ADSETS" && (
+                    <span className="block text-[10px] text-ink-400 mt-0.5">no live ad sets</span>
+                  )}
+                  {c.delivery === "NO_DELIVERY" && (
+                    <span className="block text-[10px] text-ink-400 mt-0.5">
+                      {c.activeAdSets} live ad set{c.activeAdSets === 1 ? "" : "s"} &middot; nothing served
+                    </span>
+                  )}
+                </td>
                 <td className="text-xs">
                   <span className="font-mono text-ink-600 dark:text-ink-300">{c.resultType}</span>
                   <span className="block font-mono text-ink-400">{c.attributionSetting}</span>

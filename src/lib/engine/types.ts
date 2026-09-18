@@ -134,12 +134,20 @@ export interface CampaignMetrics {
    * those as not delivering, this app showed them as ACTIVE, and a filter for
    * "active campaigns" returned hundreds of 2021 campaigns with no spend.
    *
-   *   DELIVERING       on, has a live ad set, and served in this range
-   *   NO_DELIVERY      on with a live ad set, but nothing served in the range
-   *   NO_ACTIVE_ADSETS on, and nothing beneath it is running
-   *   OFF              the campaign itself is paused, archived or deleted
+   * Switches are not the answer. A campaign can be ACTIVE with an ACTIVE ad set
+   * under it and still serve nothing, because every AD beneath THAT is paused -
+   * and Meta rolls none of this up. Checking one more level down would mean
+   * paginating the ads edge as well, a third full sweep of an account already
+   * fighting its own rate limit.
+   *
+   * Delivery settles it without another call: whatever the switches say, a
+   * campaign that served no impressions did not run.
+   *
+   *   DELIVERING   switched on, and served impressions in this range
+   *   NOT_SERVING  switched on, and served nothing in this range
+   *   OFF          the campaign itself is paused, archived or deleted
    */
-  delivery?: "DELIVERING" | "NO_DELIVERY" | "NO_ACTIVE_ADSETS" | "OFF";
+  delivery?: "DELIVERING" | "NOT_SERVING" | "OFF";
   /** Ad sets under this campaign whose effective status is ACTIVE. */
   activeAdSets?: number;
   resultType: ResultType;

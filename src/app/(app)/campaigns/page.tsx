@@ -17,7 +17,7 @@ interface CampaignRow {
   name: string;
   status: string;
   /** Whether it is running, not merely switched on. See lib/meta/campaign-insights.ts. */
-  delivery?: "DELIVERING" | "NO_DELIVERY" | "NO_ACTIVE_ADSETS" | "OFF";
+  delivery?: "DELIVERING" | "NOT_SERVING" | "OFF";
   activeAdSets?: number;
   linkClicks?: number;
   cities: string[];
@@ -131,19 +131,20 @@ export default function CampaignsPage() {
   // campaign's own toggle; a campaign can sit at ACTIVE with every ad set
   // beneath it paused, which Ads Manager shows as not delivering. Filtering on
   // `status` alone put hundreds of 2021 campaigns with no spend under Active.
-  const isRunning = (c: CampaignRow) => c.delivery === "DELIVERING" || c.delivery === "NO_DELIVERY";
-  const isStopped = (c: CampaignRow) => !isRunning(c);
   const counts = {
     ALL: allCampaigns.length,
-    ACTIVE: allCampaigns.filter(isRunning).length,
-    PAUSED: allCampaigns.filter(isStopped).length,
+    ACTIVE: allCampaigns.filter((c) => c.delivery === "DELIVERING").length,
+    NOT_SERVING: allCampaigns.filter((c) => c.delivery === "NOT_SERVING").length,
+    PAUSED: allCampaigns.filter((c) => c.delivery === "OFF").length,
   };
   const campaigns =
     status === "ACTIVE"
-      ? allCampaigns.filter(isRunning)
-      : status === "PAUSED"
-        ? allCampaigns.filter(isStopped)
-        : allCampaigns;
+      ? allCampaigns.filter((c) => c.delivery === "DELIVERING")
+      : status === "NOT_SERVING"
+        ? allCampaigns.filter((c) => c.delivery === "NOT_SERVING")
+        : status === "PAUSED"
+          ? allCampaigns.filter((c) => c.delivery === "OFF")
+          : allCampaigns;
 
   return (
     <div className="space-y-4">
@@ -152,7 +153,7 @@ export default function CampaignsPage() {
           <h1 className="text-xl font-semibold text-ink-900">Campaigns</h1>
           <p className="text-sm text-ink-500 mt-0.5">
             {campaigns.length}
-            {status ? ` ${status === "ACTIVE" ? "active" : "paused"}` : ""} campaigns
+            {status === "ACTIVE" ? " delivering" : status === "NOT_SERVING" ? " on but not serving" : status === "PAUSED" ? " paused" : ""} campaigns
             {status ? ` of ${counts.ALL}` : ""} · <RangeCaption range={range} />
           </p>
           {/* Where these numbers came from. The page used to read a local table
@@ -219,7 +220,8 @@ export default function CampaignsPage() {
         <div className="inline-flex rounded-lg border border-ink-200 dark:border-ink-800 overflow-hidden">
           {([
             { value: "", label: "All", n: counts.ALL },
-            { value: "ACTIVE", label: "Active", n: counts.ACTIVE },
+            { value: "ACTIVE", label: "Delivering", n: counts.ACTIVE },
+            { value: "NOT_SERVING", label: "On, not serving", n: counts.NOT_SERVING },
             { value: "PAUSED", label: "Paused", n: counts.PAUSED },
           ] as const).map((opt) => (
             <button
@@ -280,12 +282,11 @@ export default function CampaignsPage() {
                   {/* The campaign's switch and what it is actually doing are
                       different facts. Naming the second one here is what stops
                       "ACTIVE" meaning two things at once. */}
-                  {c.delivery === "NO_ACTIVE_ADSETS" && (
-                    <span className="block text-[10px] text-ink-400 mt-0.5">no live ad sets</span>
-                  )}
-                  {c.delivery === "NO_DELIVERY" && (
+                  {c.delivery === "NOT_SERVING" && (
                     <span className="block text-[10px] text-ink-400 mt-0.5">
-                      {c.activeAdSets} live ad set{c.activeAdSets === 1 ? "" : "s"} &middot; nothing served
+                      {c.activeAdSets === 0
+                        ? "no live ad sets"
+                        : `${c.activeAdSets} live ad set${c.activeAdSets === 1 ? "" : "s"}, no ads running`}
                     </span>
                   )}
                 </td>
@@ -366,7 +367,9 @@ export default function CampaignsPage() {
               <tr>
                 <td colSpan={14} className="text-center text-ink-400 py-8">
                   {allCampaigns.length > 0 && status
-                    ? `None of the ${counts.ALL} campaigns in this range are ${status === "ACTIVE" ? "active" : "paused"}.`
+                    ? `None of the ${counts.ALL} campaigns in this range are ${
+                        status === "ACTIVE" ? "delivering" : status === "NOT_SERVING" ? "on but idle" : "paused"
+                      }.`
                     : "No campaigns match these filters."}
                 </td>
               </tr>

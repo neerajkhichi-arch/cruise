@@ -200,16 +200,20 @@ export async function getLiveCampaignMetrics(
     // different questions, and conflating them is why a filter for active
     // campaigns returned rows named _280421_ with no spend since 2021: the
     // campaign was still switched on, every ad set under it was not.
+    // Kept for the row's explanation, not for the verdict: an ACTIVE ad set
+    // with every ad under it paused still serves nothing, and Meta does not
+    // roll that up. Reading it as proof of life is what left hundreds of 2021
+    // campaigns under "Active" a second time.
     const activeAdSets = sets.filter((a) => (a.effective_status ?? a.status) === "ACTIVE").length;
     const campaignOff =
       c.status !== "ACTIVE" || ["PAUSED", "ARCHIVED", "DELETED"].includes(c.effective_status ?? "");
-    const delivery: "DELIVERING" | "NO_DELIVERY" | "NO_ACTIVE_ADSETS" | "OFF" = campaignOff
+    // Delivery is the arbiter. It needs no extra call and cannot be fooled by a
+    // switch left on in 2021.
+    const delivery: "DELIVERING" | "NOT_SERVING" | "OFF" = campaignOff
       ? "OFF"
-      : activeAdSets === 0
-        ? "NO_ACTIVE_ADSETS"
-        : n(ins?.impressions) > 0
-          ? "DELIVERING"
-          : "NO_DELIVERY";
+      : n(ins?.impressions) > 0
+        ? "DELIVERING"
+        : "NOT_SERVING";
 
     // --- cohort, from the ad set that spends the most ----------------------
     const dominant = sets[0];

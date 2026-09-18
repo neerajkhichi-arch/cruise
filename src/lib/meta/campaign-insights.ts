@@ -66,6 +66,14 @@ interface InsightRow {
   spend?: string;
   impressions?: string;
   clicks?: string;
+  /**
+   * Clicks that actually left for the site or opened the form.
+   *
+   * `clicks` counts every click on the ad - likes, comments, profile taps, the
+   * lot. A click-to-result rate built on that denominator answers a question
+   * nobody asked; this is the one that leads somewhere.
+   */
+  inline_link_clicks?: string;
   reach?: string;
   frequency?: string;
   ctr?: string;
@@ -144,7 +152,8 @@ export async function getLiveCampaignMetrics(
       pageAll<InsightRow>(actPath(adAccountId, "insights"), {
         level: "campaign",
         fields:
-          "campaign_id,spend,impressions,clicks,reach,frequency,ctr,cpc,cpm,actions,conversions,attribution_setting",
+          "campaign_id,spend,impressions,clicks,inline_link_clicks,reach,frequency,ctr,cpc,cpm,actions,conversions," +
+          "attribution_setting",
         time_range: JSON.stringify(range),
         limit: "500",
       })
@@ -225,6 +234,7 @@ export async function getLiveCampaignMetrics(
     const spend = n(ins?.spend);
     const impressions = n(ins?.impressions);
     const clicks = n(ins?.clicks);
+    const linkClicks = n(ins?.inline_link_clicks);
     const reach = n(ins?.reach);
 
     // Budget sits on the campaign for CBO, on the ad sets otherwise.
@@ -257,6 +267,7 @@ export async function getLiveCampaignMetrics(
       cpm: n(ins?.cpm),
       impressions,
       clicks,
+      linkClicks,
       reach,
       // Frequency is impressions per person, not an average of daily values.
       frequency: n(ins?.frequency) || (reach > 0 ? impressions / reach : 0),

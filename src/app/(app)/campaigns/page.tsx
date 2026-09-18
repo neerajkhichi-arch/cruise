@@ -19,6 +19,7 @@ interface CampaignRow {
   /** Whether it is running, not merely switched on. See lib/meta/campaign-insights.ts. */
   delivery?: "DELIVERING" | "NO_DELIVERY" | "NO_ACTIVE_ADSETS" | "OFF";
   activeAdSets?: number;
+  linkClicks?: number;
   cities: string[];
   dailyBudget: number;
   spend: number;
@@ -260,13 +261,14 @@ export default function CampaignsPage() {
               <th className="text-right">CPC</th>
               <th className="text-right">CPM</th>
               <th className="text-right">Results</th>
+              <th className="text-right">Click &rarr; result</th>
               <th className="text-right">Cost / result</th>
               <th className="text-right">Ceiling</th>
               {canEdit && <th className="text-right">Actions</th>}
             </tr>
           </thead>
           <tbody>
-            {loading && Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={17}><div className="h-6 bg-ink-50 animate-pulse rounded" /></td></tr>)}
+            {loading && Array.from({ length: 8 }).map((_, i) => <tr key={i}><td colSpan={18}><div className="h-6 bg-ink-50 animate-pulse rounded" /></td></tr>)}
             {campaigns.map((c) => (
               <tr key={c.campaignId}>
                 <td>
@@ -307,6 +309,29 @@ export default function CampaignsPage() {
                 <td className="text-right tabular-nums" title={c.resultAction ? `Counted from ${c.resultAction}` : undefined}>
                   {num(c.leads)}
                 </td>
+                {/* Results per LINK click. Meta's `clicks` counts reactions,
+                    comments and profile taps too, none of which could have
+                    become a lead - a rate built on that denominator means
+                    nothing. Falls back to all clicks only when Meta reports no
+                    link clicks at all. */}
+                <td className="text-right tabular-nums" title={
+                  (c.linkClicks ?? 0) > 0
+                    ? `${num(c.leads)} results from ${num(c.linkClicks ?? 0)} link clicks`
+                    : c.clicks > 0
+                      ? `${num(c.leads)} results from ${num(c.clicks)} clicks - Meta reported no link clicks for this campaign`
+                      : undefined
+                }>
+                  {(() => {
+                    const denom = (c.linkClicks ?? 0) > 0 ? c.linkClicks! : c.clicks;
+                    if (!denom) return "—";
+                    const rate = (c.leads / denom) * 100;
+                    return (
+                      <span className={cn(rate === 0 && c.spend > 0 && "text-red-600")}>
+                        {rate >= 10 ? rate.toFixed(1) : rate.toFixed(2)}%
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td className={cn("text-right tabular-nums", c.leads > 0 && c.cpl > c.targetCpl * 1.2 && "text-red-600")}>{c.leads > 0 ? inr(c.cpl) : "—"}</td>
                 <td className="text-right tabular-nums text-ink-500">{c.targetCpl > 0 ? inr(c.targetCpl) : "—"}</td>
                 {canEdit && (
@@ -339,7 +364,7 @@ export default function CampaignsPage() {
             ))}
             {!loading && campaigns.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center text-ink-400 py-8">
+                <td colSpan={14} className="text-center text-ink-400 py-8">
                   {allCampaigns.length > 0 && status
                     ? `None of the ${counts.ALL} campaigns in this range are ${status === "ACTIVE" ? "active" : "paused"}.`
                     : "No campaigns match these filters."}

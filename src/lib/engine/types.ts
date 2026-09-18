@@ -167,6 +167,13 @@ export interface CampaignMetrics {
   cpm: number;
   impressions: number;
   clicks: number;
+  /**
+   * Clicks that left for the destination, rather than every click on the ad.
+   *
+   * The denominator for click-to-result: `clicks` includes reactions, comments
+   * and profile taps, none of which could have become a lead.
+   */
+  linkClicks?: number;
   reach: number;
   frequency: number;
   targetCpl: number;

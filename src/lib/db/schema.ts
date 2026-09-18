@@ -122,6 +122,25 @@ export const userAccounts = pgTable(
   })
 );
 
+/**
+ * Ad accounts Meta has told us to back off from, and until when.
+ *
+ * Shared rather than in-memory because the breaker that lives in a process is
+ * only as good as the process. On Vercel each request may land on a different
+ * instance with an empty map, so an account could be rate-limited, blocked, and
+ * still receive a full set of calls from the next cold start - which is exactly
+ * what keeps a rate limit from ever clearing. One row, read once per request,
+ * makes the cooling-off window mean the same thing everywhere.
+ */
+export const metaCooldowns = pgTable("meta_cooldowns", {
+  /** Ad account id, without the `act_` prefix. */
+  accountId: text("account_id").primaryKey(),
+  until: timestamp("until", { withTimezone: true }).notNull(),
+  /** What Meta said, so a cooling-off window can be explained rather than just obeyed. */
+  reason: text("reason"),
+  noticedAt: timestamp("noticed_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const cities = pgTable("cities", {
   id: text("id").primaryKey(),
   name: text("name").notNull().unique(),

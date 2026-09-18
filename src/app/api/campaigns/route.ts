@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { CampaignMetrics } from "@/lib/engine/types";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { campaigns, campaignCities, namingConvention } from "@/lib/db/schema";
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
   const live =
     process.env.USE_MOCK_META === "false" && Boolean(process.env.META_ACCESS_TOKEN?.trim());
 
-  let rows;
+  let rows: CampaignMetrics[];
   let source: "META" | "PLATFORM" = "PLATFORM";
   let notes: string[] = [];
   let sourceError: string | null = null;
@@ -47,9 +48,19 @@ export async function GET(req: Request) {
     } catch (err) {
       // Falling back silently would put stale numbers back on screen under a
       // live badge — the exact failure this change exists to remove. Say so.
+      // No fallback to the platform tables. Saying so in a banner was not
+      // enough: those rows are the seeded CarDekho campaigns, they are not
+      // scoped to an ad account, and nothing has written them since
+      // 2026-09-01 - so a Meta failure on BikeDekho filled the screen with
+      // eighteen used-car campaigns under BikeDekho's name. A reader who skims
+      // the banner takes those figures as this account's.
+      //
+      // An empty table and a clear reason is the honest answer to "Meta could
+      // not be read".
       sourceError =
         err instanceof GraphError ? err.describe() : err instanceof Error ? err.message : String(err);
-      rows = await getCampaignMetrics({ since: range.since, until: range.until });
+      rows = [];
+      source = "META";
     }
   } else {
     rows = await getCampaignMetrics({ since: range.since, until: range.until });

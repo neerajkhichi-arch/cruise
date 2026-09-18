@@ -223,7 +223,7 @@ export function isRateLimitError(err: unknown): boolean {
  */
 function fail(path: string, payload: Record<string, unknown>, body: Record<string, unknown>): never {
   const err = new GraphError(path, payload, (body.error ?? { message: "Graph API call failed" }) as never);
-  if (isRateLimitError(err)) noteRateLimited(currentAccountId());
+  if (isRateLimitError(err)) noteRateLimited(currentAccountId(), err.message);
   throw err;
 }
 

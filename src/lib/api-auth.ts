@@ -86,7 +86,7 @@ export async function requireAccount(req: Request): Promise<
   //
   // 429 with Retry-After, so this is distinguishable from a failure: nothing is
   // wrong, and the answer is to wait rather than to investigate.
-  const cooling = cooldownRemaining(account.id);
+  const cooling = await cooldownRemaining(account.id);
   if (cooling > 0) {
     const seconds = Math.ceil(cooling / 1000);
     const minutes = Math.max(1, Math.ceil(seconds / 60));

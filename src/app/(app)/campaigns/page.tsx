@@ -30,6 +30,7 @@ interface CampaignRow {
   targetCpl: number;
   inventoryCount: number;
   resultType: string;
+  resultAction?: string | null;
   attributionSetting: string;
   cohort: string;
   stage: string;
@@ -227,7 +228,11 @@ export default function CampaignsPage() {
                 <td className="text-right tabular-nums">{c.impressions > 0 ? `${c.ctr.toFixed(2)}%` : "—"}</td>
                 <td className="text-right tabular-nums">{c.clicks > 0 ? inrPrecise(c.cpc) : "—"}</td>
                 <td className="text-right tabular-nums">{c.impressions > 0 ? inr(c.cpm) : "—"}</td>
-                <td className="text-right tabular-nums">{num(c.leads)}</td>
+                {/* The action counted is on the cell, so a 0 can be checked
+                    against Ads Manager rather than merely doubted. */}
+                <td className="text-right tabular-nums" title={c.resultAction ? `Counted from ${c.resultAction}` : undefined}>
+                  {num(c.leads)}
+                </td>
                 <td className={cn("text-right tabular-nums", c.leads > 0 && c.cpl > c.targetCpl * 1.2 && "text-red-600")}>{c.leads > 0 ? inr(c.cpl) : "—"}</td>
                 <td className="text-right tabular-nums text-ink-500">{c.targetCpl > 0 ? inr(c.targetCpl) : "—"}</td>
                 {canEdit && (

@@ -24,6 +24,7 @@ import { actPath, graphGet } from "./graph";
 import { leadActionType, readTargetLocations } from "./city-leads";
 import { TTL, cached } from "./cache";
 import { getAllAdSets } from "./adsets";
+import { countResult, resultActionsFor } from "./result-action";
 import type { CampaignMetrics } from "../engine/types";
 import type { AttributionSetting, FunnelStage, ResultType } from "../engine/classify";
 
@@ -97,9 +98,8 @@ async function pageAll<T>(path: string, params: Record<string, string>): Promise
  * Anything unrecognised stays PIXEL_LEAD rather than inventing a category.
  */
 function resultTypeFor(goal?: string, promoted?: AdSetRow["promoted_object"]): ResultType {
-  if (goal === "CONVERSATIONS" || goal === "LEAD_GENERATION") {
-    return goal === "CONVERSATIONS" ? "MESSAGING" : "LEAD_FORM";
-  }
+  if (goal === "CONVERSATIONS" || goal === "QUALITY_CALL" || goal === "MESSAGING_PURCHASE_CONVERSION") return "MESSAGING";
+  if (goal === "LEAD_GENERATION" || goal === "QUALITY_LEAD") return "LEAD_FORM";
   if (promoted?.custom_event_type === "OTHER" || goal === "OFFSITE_CONVERSIONS") return "PIXEL_LEAD";
   return "PIXEL_LEAD";
 }
@@ -190,28 +190,19 @@ export async function getLiveCampaignMetrics(
 
     // --- results, counted by what THIS campaign optimises for --------------
     //
-    // The result type was already worked out above, from the ad set's own
-    // optimisation goal - and then ignored, because every campaign's result was
-    // counted against one account-wide pixel event. A lead form does not report
-    // a pixel event and a messaging campaign does not either, so on an account
-    // mixing all three, two of them read zero while Ads Manager showed
-    // hundreds. The classification was right there; nothing used it.
+    // Derived from the ad set's own optimisation goal and promoted object -
+    // the same two fields Meta delivers against - rather than from one
+    // account-wide pixel event. An account running instant forms, website
+    // conversions and click-to-message at once has no single right answer:
+    // whichever event was configured, the other two kinds of campaign reported
+    // zero while Ads Manager showed thousands. See lib/meta/result-action.ts.
     const all = [...(ins?.conversions ?? []), ...(ins?.actions ?? [])];
-    const countOf = (type: string) => Number(all.find((x) => x.action_type === type)?.value ?? 0) || 0;
-    const leads =
-      resultType === "LEAD_FORM"
-        ? // On-Facebook instant forms. Older accounts report the grouped
-          // on-site action instead, so both are accepted and the larger taken -
-          // they are the same leads counted under two names, never additive.
-          Math.max(countOf("leadgen.other"), countOf("onsite_conversion.lead_grouped"))
-        : resultType === "MESSAGING"
-          ? Math.max(
-              countOf("onsite_conversion.messaging_conversation_started_7d"),
-              countOf("onsite_conversion.total_messaging_connection")
-            )
-          : // A website conversion, which is the only case where the account's
-            // configured lead event applies.
-            countOf(action);
+    const resultActions = resultActionsFor(dominant, action);
+    const counted = countResult(all, resultActions);
+    const leads = counted.value;
+    // What was counted, carried through so a figure can be checked against Ads
+    // Manager instead of merely believed or disbelieved.
+    const resultAction = counted.matched;
     const spend = n(ins?.spend);
     const impressions = n(ins?.impressions);
     const clicks = n(ins?.clicks);
@@ -229,6 +220,7 @@ export async function getLiveCampaignMetrics(
       cities,
       stage,
       resultType,
+      resultAction,
       attributionSetting,
       cohort: `${resultType}::${attributionSetting}`,
       dailyBudget,

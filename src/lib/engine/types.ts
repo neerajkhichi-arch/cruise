@@ -127,6 +127,17 @@ export interface CampaignMetrics {
   /** Derived from ad set settings, never from `name`. */
   stage: FunnelStage | "MIXED";
   resultType: ResultType;
+  /**
+   * The Meta action_type this campaign's results were counted from.
+   *
+   * Carried so a figure can be checked against Ads Manager. A result count is
+   * only meaningful alongside what was counted: 0 against leadgen.other and 0
+   * against a custom pixel event mean quite different things, and for a while
+   * every campaign here was counted against one account-wide event regardless
+   * of what it optimised for. Null on the seeded platform tables, which have
+   * no Meta action behind them.
+   */
+  resultAction?: string | null;
   attributionSetting: AttributionSetting;
   cohort: string;
   dailyBudget: number;

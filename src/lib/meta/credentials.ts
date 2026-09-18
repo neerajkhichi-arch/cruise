@@ -43,6 +43,20 @@ interface MetaContext {
   token: string | null;
   /** False when this account has no token of its own. */
   perAccount: boolean;
+  /**
+   * The pixel event THIS account counts as a lead. Null falls back to
+   * META_CONVERSION_EVENT.
+   *
+   * It rides along with the token for the same reason the token does: which
+   * event means "a lead" is a property of the ad account, not of the install.
+   * `meta_accounts.conversion_event` has been settable in Settings -> Ad
+   * accounts since the Postgres port, but nothing on any screen read it - every
+   * account was counted against the single environment value, which is the Used
+   * Car pixel event. BikeDekho, Trucks Dekho and the Media Sales accounts
+   * therefore reported spend, impressions and clicks correctly and zero leads,
+   * which reads as a bad month rather than as a misconfiguration.
+   */
+  conversionEvent: string | null;
 }
 
 const storage = new AsyncLocalStorage<MetaContext>();
@@ -67,13 +81,21 @@ function systemUserToken(): string {
  */
 export async function credentialFor(accountId: string): Promise<MetaContext> {
   const rows = await db
-    .select({ token: metaAccounts.accessTokenEncrypted, expires: metaAccounts.tokenExpiresAt })
+    .select({
+      token: metaAccounts.accessTokenEncrypted,
+      expires: metaAccounts.tokenExpiresAt,
+      conversionEvent: metaAccounts.conversionEvent,
+    })
     .from(metaAccounts)
     .where(eq(metaAccounts.id, accountId))
     .limit(1);
 
+  // Read once, whichever branch we take below. An account with no token of its
+  // own still has its own lead event, and the early return used to drop it.
+  const conversionEvent = rows[0]?.conversionEvent?.trim() || null;
+
   const stored = rows[0]?.token;
-  if (!stored) return { accountId, token: null, perAccount: false };
+  if (!stored) return { accountId, token: null, perAccount: false, conversionEvent };
 
   const expires = rows[0]?.expires;
   if (expires && expires.getTime() < Date.now()) {
@@ -83,7 +105,7 @@ export async function credentialFor(accountId: string): Promise<MetaContext> {
     );
   }
 
-  return { accountId, token: decryptSecret(stored), perAccount: true };
+  return { accountId, token: decryptSecret(stored), perAccount: true, conversionEvent };
 }
 
 /**
@@ -124,4 +146,16 @@ export function currentToken(): string {
 /** Which account the current call is about, when anything is set. */
 export function currentAccountId(): string | null {
   return storage.getStore()?.accountId ?? null;
+}
+
+/**
+ * The pixel event the current account counts as a lead.
+ *
+ * Synchronous, like `currentToken()`, so the four reporting modules that ask
+ * for it do not have to become async or thread an account through. Null when
+ * no context is set or the account has not been given one - the caller falls
+ * back to the environment value, which is what every account used to do.
+ */
+export function currentConversionEvent(): string | null {
+  return storage.getStore()?.conversionEvent ?? null;
 }

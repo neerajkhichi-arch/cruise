@@ -42,10 +42,19 @@ export default function AiOptimiserPage() {
   const canEdit = session?.user.role !== "VIEWER";
 
   const { data: rulesData, refetch: refetchRules } = useFetch<{ rules: Rule[] }>("/api/rules");
-  const { data: recData, refetch: refetchRecs } = useFetch<{ recommendations: RecRow[]; counts: any }>("/api/recommendations?source=RULE&status=PENDING&limit=100");
+  const { data: recData, refetch: refetchRecs } = useFetch<{
+    recommendations: RecRow[];
+    counts: any;
+    unavailable?: boolean;
+    reason?: string;
+  }>("/api/recommendations?source=RULE&status=PENDING&limit=100");
 
   const [applying, setApplying] = useState(false);
 
+  // The rules engine reads the seeded tables, which are withheld on a live
+  // install. "Nothing triggered" and "we did not look" must not render as the
+  // same sentence - the first is a result, the second is an absence of one.
+  const rulesWithheld = recData?.unavailable === true;
   const cityCampaignRecs = (recData?.recommendations ?? []).filter((r) => r.scope === "CITY" || r.scope === "CAMPAIGN");
   const vehicleFlagCount = recData?.counts?.vehicleFlags ?? 0;
 
@@ -108,7 +117,9 @@ export default function AiOptimiserPage() {
             </Link>
           )}
         </div>
-        {cityCampaignRecs.length === 0 ? (
+        {rulesWithheld ? (
+          <p className="text-sm text-ink-500 py-6 px-2 text-center leading-relaxed">{recData?.reason}</p>
+        ) : cityCampaignRecs.length === 0 ? (
           <p className="text-sm text-ink-400 py-6 text-center">No campaign or city rule triggers right now — performance is within target.</p>
         ) : (
           <div className="space-y-3">

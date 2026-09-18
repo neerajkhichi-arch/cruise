@@ -28,11 +28,24 @@ import { graphGet, actPath } from "./graph";
 import { CONVERSION_EVENT } from "../../../scripts/verified-account-facts";
 import { startOfMonth, todayInAccountTz } from "../date-range";
 import { TTL, cached } from "./cache";
+import { currentConversionEvent } from "./credentials";
+
+/**
+ * The pixel event this account counts as a lead, bare.
+ *
+ * Order: the account's own setting, then the environment, then the verified
+ * default. The account comes first because an install carrying several
+ * businesses' ad accounts has no single right answer - CarDekho's Used Car
+ * pixel event does not exist on BikeDekho or on the Media Sales accounts, and
+ * counting them against it returns zero rather than an error.
+ */
+export function leadEventName(): string {
+  return currentConversionEvent() || process.env.META_CONVERSION_EVENT?.trim() || CONVERSION_EVENT;
+}
 
 /** The action Meta reports for this account's website lead event. */
 export function leadActionType(): string {
-  const event = process.env.META_CONVERSION_EVENT?.trim() || CONVERSION_EVENT;
-  return `offsite_conversion.fb_pixel_custom.${event}`;
+  return `offsite_conversion.fb_pixel_custom.${leadEventName()}`;
 }
 
 export interface CityLeadCount {

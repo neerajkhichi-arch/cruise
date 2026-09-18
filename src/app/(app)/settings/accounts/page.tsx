@@ -231,7 +231,10 @@ export default function AccountsPage() {
                       onChange={(e) => setDraft({ ...draft, conversionEvent: e.target.value })}
                     />
                     <p className="text-xs text-ink-500 mt-1">
-                      What counts as a lead here. Empty uses the default from .env.
+                      The pixel event this account fires on a lead. Every lead and CPL figure for this account counts
+                      this event and nothing else, so if it is wrong the dashboard shows spend, clicks and impressions
+                      normally and zero leads. Empty falls back to the default in .env &mdash; CarDekho&apos;s used-car
+                      event, which does not fire on the other accounts.
                     </p>
                   </div>
                   <div className="sm:col-span-2">

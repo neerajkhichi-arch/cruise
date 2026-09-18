@@ -27,7 +27,7 @@
  */
 
 import { actPath, graphGet } from "./graph";
-import { leadActionType } from "./city-leads";
+import { leadActionType, leadEventName } from "./city-leads";
 import { TTL, cached } from "./cache";
 import { addDays, dayCount } from "../date-range";
 
@@ -180,9 +180,13 @@ export async function getAccountSummary(
       "Meta reports no delivery at all in this range. That is a real answer, not a loading state — nothing was served."
     );
   } else if (totals.leads === 0 && totals.spend > 0) {
-    // Worth saying out loud: it is usually the event name, not the campaigns.
+    // Worth saying out loud: it is almost always the event name, not the
+    // campaigns. Naming the bare event and where to change it turns a figure
+    // that looks like a bad month into one somebody can actually fix.
     notes.push(
-      `Spend but no leads. This app counts only "${action}" as a lead, so if the pixel event was renamed, every lead figure here reads zero.`
+      `Spend but no leads. This account counts only the pixel event "${leadEventName()}" as a lead. If this ` +
+        `account fires a different event, set it against the account in Settings -> Ad accounts - until then every ` +
+        `lead and CPL figure here reads zero while spend, clicks and impressions look normal.`
     );
   }
 

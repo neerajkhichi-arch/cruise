@@ -23,10 +23,10 @@
  */
 
 import { graphGet } from "./graph";
+import { leadEventName } from "./city-leads";
 import {
   AD_SET_DEFAULTS,
   CAMPAIGN_DEFAULTS,
-  CONVERSION_EVENT,
   CREATIVE_TEMPLATE,
   PROMOTED_OBJECT,
   PV_AUDIENCE,
@@ -332,12 +332,18 @@ export async function readBlueprint(campaignId: string): Promise<SourceBlueprint
   }
 
   // The API returns `custom_event_type: "OTHER"` but often omits which custom
-  // event that is. Confirmed in Ads Manager: UCR_Lead_Submit_New. Filling it in
-  // is not a guess — it is the value the account's live ad sets optimise for,
-  // and creating an ad set without it optimises for nothing while looking fine.
+  // event that is. Filling it in is not a guess - it is the value the account's
+  // live ad sets optimise for, and creating an ad set without it optimises for
+  // nothing while looking fine.
+  //
+  // It comes from the ACCOUNT being published into, not from the environment.
+  // Reading one global here was worse than the matching reporting bug: a
+  // BikeDekho ad set would have been created optimising for CarDekho's Used Car
+  // pixel event, which Meta accepts and then delivers against an event that
+  // never fires in that account.
   const promotedObject: Record<string, unknown> = { ...(source.promoted_object ?? {}) };
   if (promotedObject.custom_event_type === "OTHER" && !promotedObject.custom_event_str) {
-    promotedObject.custom_event_str = process.env.META_CONVERSION_EVENT?.trim() || CONVERSION_EVENT;
+    promotedObject.custom_event_str = leadEventName();
   }
 
   const attribution = source.attribution_spec?.[0];

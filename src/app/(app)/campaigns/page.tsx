@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useFetch } from "@/lib/useFetch";
+import { CplAttention } from "@/components/CplAttention";
 import { inr, inrPrecise, num, cn } from "@/lib/format";
 import { StatusChip } from "@/components/ui/DeltaChip";
 import { CityList } from "@/components/ui/CityList";
@@ -160,6 +161,10 @@ export default function CampaignsPage() {
           )}
         </div>
       </div>
+
+      {/* Cost per result against each campaign's own three-month history, with
+          budget changes taken into account before anything is raised. */}
+      <CplAttention />
 
       {data?.sourceError && (
         <div className="rounded-xl border border-negative/40 bg-negative/5 p-3.5">

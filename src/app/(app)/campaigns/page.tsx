@@ -56,8 +56,11 @@ export default function CampaignsPage() {
   // spans two months' budgets. The enforcement and Lead targets already work on
   // the calendar month; this makes the whole app agree.
   const [range, setRange] = useState<DateRange>(() => resolvePreset("this_month"));
+  // Status is NOT sent to the server. It used to be, which meant every flick
+  // of the filter was a round trip that could re-read the whole ad account from
+  // Meta - the same mistake the search box already learned from. The rows are
+  // in memory; narrowing them is a client-side operation.
   const qs = new URLSearchParams({
-    ...(status ? { status } : {}),
     ...(searchQuery ? { search: searchQuery } : {}),
     since: range.since,
     until: range.until,
@@ -68,7 +71,6 @@ export default function CampaignsPage() {
     notes: string[];
     sourceError: string | null;
   }>(`/api/campaigns?${qs}`, [
-    status,
     searchQuery,
     range.since,
     range.until,
@@ -117,7 +119,15 @@ export default function CampaignsPage() {
     setBusyId(null);
   }
 
-  const campaigns = data?.campaigns ?? [];
+  const allCampaigns = data?.campaigns ?? [];
+  // Counts come from everything fetched, not from what is on screen, so the
+  // toggle can say how many it would show before it is pressed.
+  const counts = {
+    ALL: allCampaigns.length,
+    ACTIVE: allCampaigns.filter((c) => c.status === "ACTIVE").length,
+    PAUSED: allCampaigns.filter((c) => c.status === "PAUSED").length,
+  };
+  const campaigns = status ? allCampaigns.filter((c) => c.status === status) : allCampaigns;
 
   return (
     <div className="space-y-4">
@@ -125,7 +135,9 @@ export default function CampaignsPage() {
         <div>
           <h1 className="text-xl font-semibold text-ink-900">Campaigns</h1>
           <p className="text-sm text-ink-500 mt-0.5">
-            {campaigns.length} campaigns · <RangeCaption range={range} />
+            {campaigns.length}
+            {status ? ` ${status === "ACTIVE" ? "active" : "paused"}` : ""} campaigns
+            {status ? ` of ${counts.ALL}` : ""} · <RangeCaption range={range} />
           </p>
           {/* Where these numbers came from. The page used to read a local table
               that stopped updating on 1 September while the sidebar said
@@ -184,12 +196,35 @@ export default function CampaignsPage() {
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-ink-400" />
           <input className="input pl-8 w-60" placeholder="Search campaigns…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <select className="input w-40" value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="">All statuses</option>
-          <option value="ACTIVE">Active</option>
-          <option value="PAUSED">Paused</option>
-          <option value="DRAFT">Draft</option>
-        </select>
+        {/* A toggle rather than a dropdown: there are three answers, this is the
+            filter people reach for most, and a dropdown hides the counts -
+            which are the useful part. Instant, because it narrows rows already
+            fetched rather than asking the server again. */}
+        <div className="inline-flex rounded-lg border border-ink-200 dark:border-ink-800 overflow-hidden">
+          {([
+            { value: "", label: "All", n: counts.ALL },
+            { value: "ACTIVE", label: "Active", n: counts.ACTIVE },
+            { value: "PAUSED", label: "Paused", n: counts.PAUSED },
+          ] as const).map((opt) => (
+            <button
+              key={opt.value || "all"}
+              type="button"
+              onClick={() => setStatus(opt.value)}
+              aria-pressed={status === opt.value}
+              className={cn(
+                "px-3 py-1.5 text-sm transition-colors",
+                status === opt.value
+                  ? "bg-brand-600 text-white font-medium"
+                  : "bg-white dark:bg-transparent text-ink-600 dark:text-ink-300 hover:bg-ink-50 dark:hover:bg-ink-900"
+              )}
+            >
+              {opt.label}
+              <span className={cn("ml-1.5 tabular-nums", status === opt.value ? "opacity-80" : "text-ink-400")}>
+                {opt.n}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="card overflow-x-auto">
@@ -275,7 +310,13 @@ export default function CampaignsPage() {
               </tr>
             ))}
             {!loading && campaigns.length === 0 && (
-              <tr><td colSpan={13} className="text-center text-ink-400 py-8">No campaigns match these filters.</td></tr>
+              <tr>
+                <td colSpan={13} className="text-center text-ink-400 py-8">
+                  {allCampaigns.length > 0 && status
+                    ? `None of the ${counts.ALL} campaigns in this range are ${status === "ACTIVE" ? "active" : "paused"}.`
+                    : "No campaigns match these filters."}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

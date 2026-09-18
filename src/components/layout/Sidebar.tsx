@@ -33,7 +33,12 @@ import { cn } from "@/lib/format";
  * worth noticing; mock is the safe one.
  */
 function MetaModeBadge() {
-  const [mode, setMode] = useState<{ live: boolean; reasons: string[]; adAccountId: string | null } | null>(null);
+  const [mode, setMode] = useState<{
+    live: boolean;
+    reasons: string[];
+    adAccountId: string | null;
+    accountName?: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,9 +69,12 @@ function MetaModeBadge() {
       <div className="rounded-lg bg-gradient-to-br from-amber-600 to-amber-800 p-3 text-white">
         <p className="text-xs font-medium opacity-90">Meta connection</p>
         <p className="text-sm font-semibold mt-0.5">Live — real ad account</p>
+        {/* Names the SELECTED account, which is what the badge is for. It
+            used to print META_AD_ACCOUNT_ID whatever the switcher said. */}
         <p className="text-[11px] opacity-75 mt-1">
-          {mode.adAccountId ? `act_${mode.adAccountId} · writes are real` : "Writes are real"}
+          {mode.accountName ? `${mode.accountName} · writes are real` : "Writes are real"}
         </p>
+        {mode.adAccountId && <p className="text-[11px] opacity-60 font-mono">act_{mode.adAccountId}</p>}
       </div>
     );
   }

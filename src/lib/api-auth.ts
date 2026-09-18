@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { canEditAccount, canView, resolveAccount, type MetaAccount, type Viewer } from "@/lib/accounts";
 import { enterAccountCredential } from "@/lib/meta/credentials";
+import { cooldownRemaining } from "@/lib/meta/throttle";
 
 export async function requireSession() {
   const session = await getServerSession(authOptions);
@@ -74,6 +75,36 @@ export async function requireAccount(req: Request): Promise<
       account: null,
       session: null,
       error: NextResponse.json({ error: "You do not have access to that ad account." }, { status: 403 }),
+    };
+  }
+
+  // Meta rate-limits per ad account, and calling a blocked account keeps it
+  // blocked. So once one read comes back rate-limited, every request about that
+  // account is refused HERE, before anything reaches Meta, until the window
+  // passes. Reloading the dashboard then costs nothing and the account is left
+  // alone long enough to actually recover.
+  //
+  // 429 with Retry-After, so this is distinguishable from a failure: nothing is
+  // wrong, and the answer is to wait rather than to investigate.
+  const cooling = cooldownRemaining(account.id);
+  if (cooling > 0) {
+    const seconds = Math.ceil(cooling / 1000);
+    const minutes = Math.max(1, Math.ceil(seconds / 60));
+    return {
+      account: null,
+      session: null,
+      error: NextResponse.json(
+        {
+          error:
+            `Meta rate-limited ${account.name}, so Cruise is leaving it alone for about ${minutes} more ` +
+            `minute${minutes === 1 ? "" : "s"}. The limit is per ad account and clears on its own, but only if ` +
+            `nothing keeps calling it - so this request was stopped here rather than sent. Nothing is broken and ` +
+            `no data was lost. Publishing to this account is blocked for the same window.`,
+          coolingDown: true,
+          retryAfterSeconds: seconds,
+        },
+        { status: 429, headers: { "Retry-After": String(seconds) } }
+      ),
     };
   }
 

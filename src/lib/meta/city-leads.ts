@@ -28,6 +28,7 @@ import { graphGet, actPath } from "./graph";
 import { CONVERSION_EVENT } from "../../../scripts/verified-account-facts";
 import { startOfMonth, todayInAccountTz } from "../date-range";
 import { TTL, cached } from "./cache";
+import { getAllAdSets } from "./adsets";
 import { currentConversionEvent } from "./credentials";
 
 /**
@@ -201,23 +202,10 @@ export async function getCityLeadsThisMonth(
   const unmatched: { adSetName: string; spend: number; seen: string[] }[] = [];
 
   // --- every ad set, with the geo that decides which city it belongs to -----
-  const adSets: AdSetRow[] = await cached(`city-adsets:${adAccountId}`, TTL.structure, async () => {
-  const adSets: AdSetRow[] = [];
-  let after: string | undefined;
-  do {
-    const page = await graphGet<{ data: AdSetRow[]; paging?: { cursors?: { after?: string }; next?: string } }>(
-      actPath(adAccountId, "adsets"),
-      {
-        fields: "id,name,status,campaign_id,campaign{id,name,status},targeting{geo_locations},promoted_object",
-        limit: "200",
-        ...(after ? { after } : {}),
-      }
-    );
-    adSets.push(...(page.data ?? []));
-    after = page.paging?.next ? page.paging?.cursors?.after : undefined;
-  } while (after);
-  return adSets;
-  });
+  // One shared ad-set read - see lib/meta/adsets.ts. This was a third
+  // pagination of the same edge, fired at the same moment as the other two
+  // whenever the dashboard loaded.
+  const adSets: AdSetRow[] = await getAllAdSets<AdSetRow>(adAccountId);
 
   // --- insights over the range, at ad set level -----------------------------
   const insights = new Map<string, InsightRow>(

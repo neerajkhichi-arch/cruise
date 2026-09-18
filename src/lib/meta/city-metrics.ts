@@ -33,6 +33,7 @@
 import { actPath, graphGet } from "./graph";
 import { leadActionType, readTargetLocations } from "./city-leads";
 import { TTL, cached } from "./cache";
+import { getAllAdSets } from "./adsets";
 import { getCatalogueCityCounts } from "./catalogue";
 import { precedingWindow } from "./account-summary";
 import { dayCount } from "../date-range";
@@ -191,13 +192,10 @@ export async function getLiveCityMetrics(
   const notes: string[] = [];
 
   const [adSets, current, prior] = await Promise.all([
-    // Same cache key as the Campaigns screen, so opening both costs one read.
-    cached(`adsets-geo:${adAccountId}`, TTL.structure, () =>
-      pageAll<AdSetRow>(actPath(adAccountId, "adsets"), {
-        fields: "id,name,status,campaign_id,daily_budget,targeting{geo_locations}",
-        limit: "200",
-      })
-    ),
+    // One shared ad-set read - see lib/meta/adsets.ts. The Campaigns screen and
+    // the city breakdown now genuinely share it rather than each paginating the
+    // same edge for a slightly different field list.
+    getAllAdSets<AdSetRow>(adAccountId),
     cached(`insights:adset:${adAccountId}:${range.since}:${range.until}`, TTL.insights, () =>
       adSetInsights(adAccountId, range)
     ),

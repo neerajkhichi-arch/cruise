@@ -36,7 +36,8 @@ const GRAPH_VERSION = process.env.META_GRAPH_VERSION?.trim() || "v23.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 import { createHmac } from "crypto";
-import { currentToken } from "./credentials";
+import { currentAccountId, currentToken } from "./credentials";
+import { noteRateLimited } from "./throttle";
 
 export class GraphError extends Error {
   readonly type: string;
@@ -202,6 +203,30 @@ export function encodeParams(payload: Record<string, unknown>): URLSearchParams 
   return form;
 }
 
+/**
+ * True when Meta is telling us to back off from this ad account.
+ *
+ * Lives here rather than in throttle.ts because GraphError is defined here and
+ * the reverse import would be a cycle.
+ */
+export function isRateLimitError(err: unknown): boolean {
+  if (!(err instanceof GraphError)) return false;
+  return err.code === 17 || err.code === 613 || err.subcode === 2446079;
+}
+
+/**
+ * Raise a Graph failure, recording a rate limit against the current account.
+ *
+ * Every helper below goes through this, so the cooling-off window opens no
+ * matter which read tripped it - including one added tomorrow by someone who
+ * has never heard of throttle.ts.
+ */
+function fail(path: string, payload: Record<string, unknown>, body: Record<string, unknown>): never {
+  const err = new GraphError(path, payload, (body.error ?? { message: "Graph API call failed" }) as never);
+  if (isRateLimitError(err)) noteRateLimited(currentAccountId());
+  throw err;
+}
+
 export async function graphPost<T = { id: string }>(
   path: string,
   payload: Record<string, unknown>
@@ -218,7 +243,7 @@ export async function graphPost<T = { id: string }>(
     error?: ConstructorParameters<typeof GraphError>[2];
   };
   if (!res.ok || body.error) {
-    throw new GraphError(path, payload, body.error ?? { message: `HTTP ${res.status}` });
+    fail(path, payload, { error: body.error ?? { message: `HTTP ${res.status}` } });
   }
   return body as T;
 }
@@ -233,7 +258,7 @@ export async function graphGet<T = Record<string, unknown>>(
     error?: ConstructorParameters<typeof GraphError>[2];
   };
   if (!res.ok || body.error) {
-    throw new GraphError(path, params, body.error ?? { message: `HTTP ${res.status}` });
+    fail(path, params, { error: body.error ?? { message: `HTTP ${res.status}` } });
   }
   return body as T;
 }
@@ -243,7 +268,7 @@ export async function graphDelete(path: string): Promise<void> {
   const res = await fetch(`${GRAPH_BASE}/${path}?${qs.toString()}`, { method: "DELETE" });
   const body = (await res.json().catch(() => ({}))) as { error?: ConstructorParameters<typeof GraphError>[2] };
   if (!res.ok || body.error) {
-    throw new GraphError(path, {}, body.error ?? { message: `HTTP ${res.status}` });
+    fail(path, {}, { error: body.error ?? { message: `HTTP ${res.status}` } });
   }
 }
 

@@ -23,6 +23,7 @@
 import { actPath, graphGet } from "./graph";
 import { leadActionType, readTargetLocations } from "./city-leads";
 import { TTL, cached } from "./cache";
+import { getAllAdSets } from "./adsets";
 import type { CampaignMetrics } from "../engine/types";
 import type { AttributionSetting, FunnelStage, ResultType } from "../engine/classify";
 
@@ -134,13 +135,9 @@ export async function getLiveCampaignMetrics(
         limit: "200",
       })
     ),
-    cached(`adsets:${adAccountId}`, TTL.structure, () =>
-      pageAll<AdSetRow>(actPath(adAccountId, "adsets"), {
-        fields:
-          "id,name,status,campaign_id,daily_budget,optimization_goal,promoted_object,attribution_spec,targeting{geo_locations,custom_audiences}",
-        limit: "200",
-      })
-    ),
+    // One shared ad-set read - see lib/meta/adsets.ts. This used to be its own
+    // sweep of the same edge under its own cache key.
+    getAllAdSets<AdSetRow>(adAccountId),
     cached(`insights:campaign:${adAccountId}:${range.since}:${range.until}`, TTL.insights, () =>
       pageAll<InsightRow>(actPath(adAccountId, "insights"), {
         level: "campaign",

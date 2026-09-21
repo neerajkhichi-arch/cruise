@@ -311,9 +311,17 @@ export default function LeadTargetsPage() {
             {enforce.enabled ? "Auto-pause is armed" : "Auto-pause is off"}
           </p>
           <p className="text-xs text-ink-600 dark:text-ink-300 mt-1">
+            {/* This used to say "only while the server is running", which was
+                true when a timer ran inside a laptop and has not been true
+                since this moved to a scheduled job. A banner describing a
+                mechanism the app no longer uses is worse than none - it is
+                what somebody checks before deciding whether to trust it. */}
             {enforce.enabled
-              ? "Cities over budget or over target are paused in Meta without asking — but only while the server is running. Nothing is checked when it is stopped."
-              : "Set AUTO_PAUSE=true and AUTO_PAUSE_SECRET in .env, then restart, to let the app pause cities on its own."}
+              ? "Cities over budget or over target are paused in Meta without asking. The sweep runs once a day at " +
+                "07:30 IST, whether or not anyone has this open - so a city can spend up to a day past its ceiling " +
+                "before it is caught. Run check now does the same thing immediately."
+              : "Auto-pause will not run. Set AUTO_PAUSE=true in the deployment's environment variables and redeploy " +
+                "to arm it - until then nothing is paused automatically, and the daily sweep does nothing."}
           </p>
         </div>
       )}

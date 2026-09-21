@@ -21,14 +21,26 @@
  * laptop that is closed does not pause anything.
  */
 
-import { appendFile, mkdir, readFile } from "fs/promises";
-import { dirname, join } from "path";
+import { desc, eq } from "drizzle-orm";
+import { db } from "../db/client";
+import { auditLog } from "../db/schema";
+import { newId } from "../id";
 import { GraphError, graphPost } from "./graph";
 import { getCityLeadsThisMonth } from "./city-leads";
 import { fetchLeadTargets } from "../sheets/lead-targets";
 import { currentMonthRange } from "./city-leads";
 
-const LOG_PATH = join(process.cwd(), ".autocampaign", "pause-log.jsonl");
+/**
+ * What auto-pause did, in the database.
+ *
+ * It used to be a JSONL file under the app directory. On Vercel that filesystem
+ * is read-only and discarded between invocations, so every record either failed
+ * to write or vanished - and the reader swallowed the error and returned an
+ * empty list. The history read as "auto-pause has never done anything" whether
+ * it had paused ten campaigns that morning or never run at all, which is the
+ * one thing this log exists to prevent.
+ */
+const PAUSE_ACTION = "AUTO_PAUSE";
 
 export interface PauseRecord {
   at: string;
@@ -47,33 +59,49 @@ export interface PauseRecord {
   trigger: "auto" | "manual";
 }
 
-export async function recordPause(record: PauseRecord): Promise<void> {
+export async function recordPause(record: PauseRecord, accountId?: string): Promise<void> {
   try {
-    await mkdir(dirname(LOG_PATH), { recursive: true });
-    await appendFile(LOG_PATH, JSON.stringify(record) + "\n", "utf8");
-  } catch {
-    // A failed log must not stop a pause that has already happened, but it is
-    // worth knowing about.
-    console.error("[auto-pause] could not write the pause log");
+    await db.insert(auditLog).values({
+      id: newId("audit"),
+      at: new Date(record.at),
+      accountId: accountId ?? null,
+      action: PAUSE_ACTION,
+      subject: record.cityName,
+      // The whole record, so the history can show the figures the decision was
+      // made on rather than only its conclusion. "Paused Mohali" is not
+      // reviewable; "paused Mohali at 6,510 against a 6,500 budget" is.
+      detail: JSON.stringify(record),
+      ok: record.failed.length === 0,
+    });
+  } catch (err) {
+    // A failed log must not undo a pause that has already happened - but it
+    // must be loud, because a silent logging failure is what hid this.
+    console.error("[auto-pause] could not write the pause log:", err instanceof Error ? err.message : err);
   }
 }
 
 export async function readPauseLog(limit = 50): Promise<PauseRecord[]> {
   try {
-    const text = await readFile(LOG_PATH, "utf8");
-    const lines = text.trim().split("\n").filter(Boolean);
-    return lines
-      .slice(-limit)
-      .map((l) => {
+    const rows = await db
+      .select({ detail: auditLog.detail })
+      .from(auditLog)
+      .where(eq(auditLog.action, PAUSE_ACTION))
+      .orderBy(desc(auditLog.at))
+      .limit(limit);
+    return rows
+      .map((r) => {
         try {
-          return JSON.parse(l) as PauseRecord;
+          return r.detail ? (JSON.parse(r.detail) as PauseRecord) : null;
         } catch {
           return null;
         }
       })
-      .filter((r): r is PauseRecord => r !== null)
-      .reverse();
-  } catch {
+      .filter((r): r is PauseRecord => r !== null);
+  } catch (err) {
+    // Returning [] on a read failure is how "the log is unreadable" came to
+    // look identical to "nothing has ever been paused". It is still the only
+    // safe return value, but it is no longer silent.
+    console.error("[auto-pause] could not read the pause log:", err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -221,7 +249,7 @@ export async function enforceLimits(
       failed,
       trigger,
     };
-    await recordPause(record);
+    await recordPause(record, account.id);
     out.paused.push(record);
 
     console.log(

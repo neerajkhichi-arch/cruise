@@ -292,6 +292,45 @@ export function accountUsage(res: Response): { percent: number; resetSeconds: nu
 }
 
 /**
+ * Which ad account a call is about — from the URL, not from the context.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS NOT JUST `currentAccountId()`
+ *
+ * It was, and the breaker never once fired in production because of it. The
+ * `meta_cooldowns` table was EMPTY — not stale, not wrong: empty, after days of
+ * an account being rate-limited every few minutes. `noteRateLimited` returns
+ * immediately on a null account id, so every recorded window was silently
+ * dropped, and every screen built on top of it was showing a state that could
+ * never occur.
+ *
+ * The account id travels in AsyncLocalStorage, set with `enterWith` inside
+ * `requireAccount`. That is a request-scoped mechanism, and by the time a Graph
+ * call fails the store can be gone — a continuation resuming on a different
+ * async resource is enough. It works in development, which is why this looked
+ * correct for a fortnight.
+ *
+ * The account id does not need to be carried at all. It is IN THE URL of every
+ * call that could be rate-limited, because the rate limit is per ad account and
+ * those calls are made against `act_<id>/...`. Reading it from the path cannot
+ * be lost, cannot be mis-propagated, and needs nothing to have been set up.
+ *
+ * Stored ids carry no `act_` prefix (see `meta_accounts.id`), so the prefix is
+ * stripped here — a window recorded under `act_123` and looked up under `123`
+ * is the same bug wearing a different hat.
+ *
+ * The context is still consulted, for the calls addressed to a campaign or ad
+ * set id rather than to the account.
+ * ---------------------------------------------------------------------------
+ */
+function accountIdFor(path: string): string | null {
+  const match = path.match(/act_(\d+)/);
+  if (match) return match[1];
+  const contextual = currentAccountId();
+  return contextual ? contextual.replace(/^act_/, "") : null;
+}
+
+/**
  * Stop calling this account if Meta says we are nearly out of allowance.
  *
  * Runs on every successful response. Below the threshold it costs one header
@@ -299,10 +338,10 @@ export function accountUsage(res: Response): { percent: number; resetSeconds: nu
  * something to say, which is rare. Awaited, because a floating promise on
  * Vercel is a promise that may never run.
  */
-async function watchUsage(res: Response): Promise<void> {
+async function watchUsage(res: Response, path: string): Promise<void> {
   const { percent, resetSeconds } = accountUsage(res);
   if (percent < SOFT_LIMIT_PCT) return;
-  await noteApproachingLimit(currentAccountId(), percent, resetSeconds || undefined);
+  await noteApproachingLimit(accountIdFor(path), percent, resetSeconds || undefined);
 }
 
 function estimatedMinutesToRegainAccess(res: Response): number {
@@ -350,7 +389,14 @@ async function fail(
   const err = new GraphError(path, payload, (body.error ?? { message: "Graph API call failed" }) as never);
   if (isRateLimitError(err)) {
     const minutes = res ? estimatedMinutesToRegainAccess(res) : 0;
-    await noteRateLimited(currentAccountId(), err.message, minutes > 0 ? minutes * 60_000 : undefined);
+    const accountId = accountIdFor(path);
+    if (!accountId) {
+      // Loud, because this is precisely how the breaker failed silently for a
+      // fortnight: no account id means no window is recorded, which reads as
+      // "Meta has never rate-limited us" however often it has.
+      console.error(`[throttle] rate limited on ${path} but could not tell which ad account — no window recorded.`);
+    }
+    await noteRateLimited(accountId, err.message, minutes > 0 ? minutes * 60_000 : undefined);
   }
   throw err;
 }
@@ -373,7 +419,7 @@ export async function graphPost<T = { id: string }>(
   if (!res.ok || body.error) {
     await fail(path, payload, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
-  await watchUsage(res);
+  await watchUsage(res, path);
   return body as T;
 }
 
@@ -389,7 +435,7 @@ export async function graphGet<T = Record<string, unknown>>(
   if (!res.ok || body.error) {
     await fail(path, params, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
-  await watchUsage(res);
+  await watchUsage(res, path);
   return body as T;
 }
 

@@ -37,7 +37,7 @@ const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 import { createHmac } from "crypto";
 import { currentAccountId, currentToken } from "./credentials";
-import { noteRateLimited } from "./throttle";
+import { SOFT_LIMIT_PCT, noteApproachingLimit, noteRateLimited } from "./throttle";
 
 export class GraphError extends Error {
   readonly type: string;
@@ -218,7 +218,7 @@ export function isRateLimitError(err: unknown): boolean {
  * Raise a Graph failure, recording a rate limit against the current account.
  *
  * Every helper below goes through this, so the cooling-off window opens no
- * matter which read tripped it - including one added tomorrow by someone who
+ * matter which read tripped it — including one added tomorrow by someone who
  * has never heard of throttle.ts.
  */
 /**
@@ -229,15 +229,82 @@ export function isRateLimitError(err: unknown): boolean {
  * useful field is `estimated_time_to_regain_access`, in MINUTES.
  *
  * Reading it matters more than it sounds. The cooling-off window was a flat
- * five minutes, which was a guess - and when Meta wants an hour, a five-minute
+ * five minutes, which was a guess — and when Meta wants an hour, a five-minute
  * window means the app waits, retries into a still-closed door, gets refused,
  * and starts another five minutes. From the outside that is indistinguishable
  * from being permanently broken, which is exactly what BikeDekho looked like
  * all afternoon. Meta was saying how long the whole time.
  *
- * Returns 0 when the header is absent or unparseable, which is not an error -
+ * Returns 0 when the header is absent or unparseable, which is not an error —
  * the caller falls back to its own minimum.
  */
+/**
+ * How much of this ad account's Meta allowance is spent, as a percentage.
+ *
+ * Meta puts its accounting on EVERY response, including successful ones, and
+ * the app was only ever reading it from failures. That is the difference
+ * between a smoke alarm and a fire report: by the time code 17 arrives the
+ * account is already blocked for everyone, publishing included, and each
+ * hopeful reload extends it.
+ *
+ * Two headers, two shapes:
+ *   x-business-use-case-usage  {"<id>":[{call_count, total_cputime, total_time}]}
+ *   x-ad-account-usage         {"acc_id_util_pct": 9.67, "reset_time_duration": 300}
+ *
+ * The WORST of the three business metrics is the one that matters — any single
+ * one reaching 100 blocks the account, so an average would hide it. Returns 0
+ * when nothing can be read, which reads as "no reason to stop".
+ */
+export function accountUsage(res: Response): { percent: number; resetSeconds: number } {
+  let percent = 0;
+  let resetSeconds = 0;
+
+  const business = res.headers.get("x-business-use-case-usage");
+  if (business) {
+    try {
+      const parsed = JSON.parse(business) as Record<string, unknown>;
+      for (const entry of Object.values(parsed).flat()) {
+        const e = entry as Record<string, unknown> | null;
+        for (const field of ["call_count", "total_cputime", "total_time"]) {
+          const v = Number(e?.[field]);
+          if (Number.isFinite(v) && v > percent) percent = v;
+        }
+      }
+    } catch {
+      /* a header we do not understand is not a reason to fail the call */
+    }
+  }
+
+  const account = res.headers.get("x-ad-account-usage");
+  if (account) {
+    try {
+      const parsed = JSON.parse(account) as Record<string, unknown>;
+      const pct = Number(parsed?.acc_id_util_pct);
+      if (Number.isFinite(pct) && pct > percent) percent = pct;
+      const reset = Number(parsed?.reset_time_duration);
+      if (Number.isFinite(reset) && reset > resetSeconds) resetSeconds = reset;
+    } catch {
+      /* as above */
+    }
+  }
+
+  return { percent, resetSeconds };
+}
+
+/**
+ * Stop calling this account if Meta says we are nearly out of allowance.
+ *
+ * Runs on every successful response. Below the threshold it costs one header
+ * parse and touches nothing — the database is written only when there is
+ * something to say, which is rare. Awaited, because a floating promise on
+ * Vercel is a promise that may never run.
+ */
+async function watchUsage(res: Response): Promise<void> {
+  const { percent, resetSeconds } = accountUsage(res);
+  if (percent < SOFT_LIMIT_PCT) return;
+  await noteApproachingLimit(currentAccountId(), percent, resetSeconds || undefined);
+}
+
 function estimatedMinutesToRegainAccess(res: Response): number {
   for (const header of ["x-business-use-case-usage", "x-ad-account-usage"]) {
     const raw = res.headers.get(header);
@@ -265,11 +332,11 @@ function estimatedMinutesToRegainAccess(res: Response): number {
  *
  * ASYNC, and awaited by every caller, for a reason that cost most of a day:
  * this runs on Vercel, where a serverless function can be frozen the moment its
- * response is sent. A floating promise started here - `void db.insert(...)` -
+ * response is sent. A floating promise started here — `void db.insert(...)` —
  * is not guaranteed to reach Postgres before that happens. So the cooling-off
- * row was being written on a developer machine and, often, not in production:
- * the breaker looked correct, logged nothing, and let every instance keep
- * calling a blocked account.
+ * row was being written on a developer's machine and, often, not in
+ * production: the breaker looked correct, logged nothing, and let every
+ * instance keep calling a blocked account.
  *
  * Awaiting it costs one write on a request that has already failed, and makes
  * the window real.
@@ -306,6 +373,7 @@ export async function graphPost<T = { id: string }>(
   if (!res.ok || body.error) {
     await fail(path, payload, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
+  await watchUsage(res);
   return body as T;
 }
 
@@ -321,6 +389,7 @@ export async function graphGet<T = Record<string, unknown>>(
   if (!res.ok || body.error) {
     await fail(path, params, { error: body.error ?? { message: `HTTP ${res.status}` } }, res);
   }
+  await watchUsage(res);
   return body as T;
 }
 

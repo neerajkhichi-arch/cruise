@@ -87,6 +87,7 @@ export default function LeadTargetsPage() {
   // discover in Ads Manager is worse than no automation at all.
   const [enforce, setEnforce] = useState<{
     enabled: boolean;
+    resumeEnabled: boolean;
     log: {
       at: string;
       cityName: string;
@@ -96,6 +97,19 @@ export default function LeadTargetsPage() {
       spend: number;
       budget: number | null;
       paused: string[];
+      failed: { campaignId: string; error: string }[];
+      trigger: "auto" | "manual";
+    }[];
+    resumeLog: {
+      at: string;
+      cityName: string;
+      reason: "BUDGET_RAISED" | "TARGET_RAISED";
+      spend: number;
+      budgetWas: number | null;
+      budget: number | null;
+      targetWas: number | null;
+      target: number | null;
+      resumed: string[];
       failed: { campaignId: string; error: string }[];
       trigger: "auto" | "manual";
     }[];
@@ -109,6 +123,7 @@ export default function LeadTargetsPage() {
     ran: boolean;
     skipped: string | null;
     paused: { cityName: string; reason: string }[];
+    resumed?: { cityName: string; resumed: string[] }[];
     refused: { cityName: string; reason: string }[];
   } | null>(null);
 
@@ -275,7 +290,9 @@ export default function LeadTargetsPage() {
           <p className="text-sm font-semibold text-ink-900 dark:text-ink-50 mb-1.5">Check result</p>
           {checkResult.skipped ? (
             <p className="text-sm text-caution">Nothing was paused — {checkResult.skipped}</p>
-          ) : checkResult.paused.length === 0 && checkResult.refused.length === 0 ? (
+          ) : checkResult.paused.length === 0 &&
+            checkResult.refused.length === 0 &&
+            (checkResult.resumed?.length ?? 0) === 0 ? (
             <p className="text-sm text-ink-600 dark:text-ink-300">
               Ran, and no city was over its budget or its target. If you expected one to be, check that its
               Budget column in the sheet has a number and that the city name matches the one shown below.
@@ -285,6 +302,12 @@ export default function LeadTargetsPage() {
               {checkResult.paused.map((p, i) => (
                 <p key={`p${i}`} className="text-sm text-ink-900 dark:text-ink-50">
                   Paused {p.cityName} — {p.reason === "BUDGET" ? "budget exhausted" : "target reached"}
+                </p>
+              ))}
+              {(checkResult.resumed ?? []).map((r, i) => (
+                <p key={`u${i}`} className="text-sm text-positive">
+                  Restarted {r.cityName} — {r.resumed.length} campaign
+                  {r.resumed.length === 1 ? "" : "s"} switched back on, because the sheet was given more room
                 </p>
               ))}
               {checkResult.refused.map((r, i) => (
@@ -314,14 +337,28 @@ export default function LeadTargetsPage() {
             {/* This used to say "only while the server is running", which was
                 true when a timer ran inside a laptop and has not been true
                 since this moved to a scheduled job. A banner describing a
-                mechanism the app no longer uses is worse than none - it is
+                mechanism the app no longer uses is worse than none — it is
                 what somebody checks before deciding whether to trust it. */}
             {enforce.enabled
               ? "Cities over budget or over target are paused in Meta without asking. The sweep runs once a day at " +
-                "07:30 IST, whether or not anyone has this open - so a city can spend up to a day past its ceiling " +
+                "07:30 IST, whether or not anyone has this open — so a city can spend up to a day past its ceiling " +
                 "before it is caught. Run check now does the same thing immediately."
               : "Auto-pause will not run. Set AUTO_PAUSE=true in the deployment's environment variables and redeploy " +
-                "to arm it - until then nothing is paused automatically, and the daily sweep does nothing."}
+                "to arm it — until then nothing is paused automatically, and the daily sweep does nothing."}
+          </p>
+          {/* Restarting is a separate switch, and the reason is worth stating
+              on the screen rather than only in the code: pausing saves money,
+              restarting spends it. */}
+          <p className="text-xs text-ink-600 dark:text-ink-300 mt-2 pt-2 border-t border-ink-200/60 dark:border-ink-800">
+            <span className="font-semibold">
+              {enforce.resumeEnabled ? "Restarting is armed too." : "Restarting is off."}
+            </span>{" "}
+            {enforce.resumeEnabled
+              ? "Raise a city's Budget or Target in the sheet and the same daily sweep switches its campaigns back " +
+                "on — but only the ones Cruise itself paused this month, only while the new figure leaves real room, " +
+                "and only if nothing else would stop it again. A campaign you paused by hand is never restarted."
+              : "Raising a budget in the sheet will not switch anything back on. Set AUTO_RESUME=true alongside " +
+                "AUTO_PAUSE to allow it. It is a separate switch on purpose: pausing saves money, restarting spends it."}
           </p>
         </div>
       )}
@@ -340,6 +377,30 @@ export default function LeadTargetsPage() {
                   ? `budget ${inr(e.spend)} of ${inr(e.budget ?? 0)}`
                   : `${e.leads} of ${e.target} leads`}{" "}
                 · {e.paused.length} paused
+                {e.failed.length > 0 && <span className="text-negative"> · {e.failed.length} failed</span>} ·{" "}
+                <span className={e.trigger === "auto" ? "text-caution" : "text-ink-500"}>
+                  {e.trigger === "auto" ? "automatic" : "by you"}
+                </span>
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {enforce && enforce.resumeLog.length > 0 && (
+        <div className="rounded-2xl border border-ink-200 dark:border-ink-800 p-4 mb-4">
+          <p className="text-xs font-semibold text-ink-700 dark:text-ink-200 mb-2 flex items-center gap-1.5">
+            <History className="h-3.5 w-3.5" /> What has been switched back on
+          </p>
+          <div className="space-y-1">
+            {enforce.resumeLog.slice(0, 8).map((e, i) => (
+              <p key={i} className="text-xs text-ink-600 dark:text-ink-300">
+                <span className="text-ink-500">{new Date(e.at).toLocaleString("en-IN")}</span> ·{" "}
+                <span className="font-semibold text-ink-900 dark:text-ink-50">{e.cityName}</span> ·{" "}
+                {e.reason === "BUDGET_RAISED"
+                  ? `budget raised ${inr(e.budgetWas ?? 0)} → ${inr(e.budget ?? 0)}, spent ${inr(e.spend)}`
+                  : `target raised ${e.targetWas} → ${e.target}`}{" "}
+                · {e.resumed.length} restarted
                 {e.failed.length > 0 && <span className="text-negative"> · {e.failed.length} failed</span>} ·{" "}
                 <span className={e.trigger === "auto" ? "text-caution" : "text-ink-500"}>
                   {e.trigger === "auto" ? "automatic" : "by you"}

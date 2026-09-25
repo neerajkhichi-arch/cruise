@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { autoPauseEnabled, enforceLimits } from "@/lib/meta/enforce";
+import { autoPauseEnabled, autoResumeEnabled, enforceLimits } from "@/lib/meta/enforce";
 import { listAllAccounts } from "@/lib/accounts";
 import { withAccountCredential } from "@/lib/meta/credentials";
+import { purgeExpiredCache } from "@/lib/meta/cache";
 
 /**
  * The scheduled auto-pause sweep.
@@ -73,9 +74,18 @@ export async function GET(req: Request) {
     }
   }
 
+  // Housekeeping, here rather than on the hot path: expired cache rows are
+  // never served, so deleting them is tidiness, and a delete on a page load is
+  // a cost paid by the request that can least afford it.
+  const purged = await purgeExpiredCache();
+
   return NextResponse.json({
     ran: true,
     at: new Date().toISOString(),
+    cacheRowsPurged: purged,
+    // Stated on every run, so a sweep that resumed nothing can be told apart
+    // from a sweep that was never allowed to.
+    resumeArmed: autoResumeEnabled(),
     accounts: runs,
     skipped: accounts
       .filter((a) => !a.leadTargetsCsvUrl)

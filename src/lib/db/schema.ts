@@ -128,7 +128,7 @@ export const userAccounts = pgTable(
  * Shared rather than in-memory because the breaker that lives in a process is
  * only as good as the process. On Vercel each request may land on a different
  * instance with an empty map, so an account could be rate-limited, blocked, and
- * still receive a full set of calls from the next cold start - which is exactly
+ * still receive a full set of calls from the next cold start — which is exactly
  * what keeps a rate limit from ever clearing. One row, read once per request,
  * makes the cooling-off window mean the same thing everywhere.
  */
@@ -138,8 +138,48 @@ export const metaCooldowns = pgTable("meta_cooldowns", {
   until: timestamp("until", { withTimezone: true }).notNull(),
   /** What Meta said, so a cooling-off window can be explained rather than just obeyed. */
   reason: text("reason"),
+  /**
+   * How many times in a row this account has tripped without recovering.
+   *
+   * A flat window assumes every rate limit is the same size. They are not: an
+   * account that trips again minutes after its window ended needs longer, and
+   * retrying on the same schedule is what keeps rolling the window forward.
+   */
+  strikes: integer("strikes").notNull().default(0),
   noticedAt: timestamp("noticed_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Meta reads, cached where every instance can see them.
+ *
+ * The cache used to be a Map in the process. On one server that is exactly
+ * right; on Vercel it is close to useless, because a request can land on an
+ * instance that has never seen this account and pays the full price again —
+ * three paginated sweeps of a large ad account, per reload. The TTLs said five
+ * minutes and in practice were often zero, which is how an account could sit
+ * rate-limited all day while the code looked careful. It is the same mistake as
+ * the in-memory breaker above, in the layer whose whole job was to prevent it.
+ *
+ * `value` is text rather than jsonb deliberately: these payloads are large, they
+ * are never queried by their contents, and Postgres compresses large text out of
+ * line for free. Parsing is the caller's job.
+ */
+export const metaCache = pgTable(
+  "meta_cache",
+  {
+    /** The same key the in-process cache uses, e.g. `adsets-all:act_123`. */
+    key: text("key").primaryKey(),
+    /** So one account's cache can be dropped without touching anyone else's. */
+    accountId: text("account_id"),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    writtenAt: timestamp("written_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    /** For the sweep that deletes expired rows, which would otherwise scan. */
+    expiryIdx: index("meta_cache_expires_idx").on(t.expiresAt),
+  })
+);
 
 export const cities = pgTable("cities", {
   id: text("id").primaryKey(),

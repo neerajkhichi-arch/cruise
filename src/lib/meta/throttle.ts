@@ -34,13 +34,52 @@ import { metaCooldowns } from "../db/schema";
 const COOLDOWN_MS = 5 * 60 * 1000;
 
 /**
- * The most, however long Meta asks for.
+ * The most we will wait on OUR OWN guess.
  *
- * A ceiling because the estimate is Meta's, arrives in a header, and a bad
- * parse or an outlier should not take an account offline for a working day.
- * An hour is long enough for any real window to pass.
+ * An hour is long enough for any ordinary window, and a guess should never take
+ * an account offline for half a working day.
  */
-const MAX_COOLDOWN_MS = 60 * 60 * 1000;
+const MAX_GUESS_MS = 60 * 60 * 1000;
+
+/**
+ * The most we will wait when META ITSELF names a number.
+ *
+ * This used to be the same hour, and that hour was the bug. Meta answers
+ * `estimated_time_to_regain_access` in minutes, and for an account that has
+ * tripped repeatedly it can be several hours. Capping at one meant the app
+ * waited an hour, retried into a door that was still shut, was refused — and
+ * every refused call rolls the window forward again. From the outside that is
+ * indistinguishable from permanently broken, which is what Media Sales looked
+ * like for days.
+ *
+ * Four hours is a long time to have an account dark, so this ceiling applies
+ * only to a figure Meta stated. Our own escalation stays under MAX_GUESS_MS.
+ */
+const MAX_META_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * Tripping again within this long of the last window ending counts as not
+ * having recovered, so the next window doubles.
+ *
+ * Without it, an account that needs four hours is poked every five minutes
+ * forever and never gets them.
+ */
+const ESCALATION_WINDOW_MS = 30 * 60 * 1000;
+
+/**
+ * The share of Meta's per-account allowance at which we stop on our own.
+ *
+ * Meta reports usage on SUCCESSFUL responses too — `call_count`,
+ * `total_cputime` and `total_time`, each as a percentage of the limit. Waiting
+ * for the error is waiting for the damage: by the time code 17 arrives the
+ * account is already blocked for everyone, publishing included, and every
+ * hopeful reload extends it. Standing down at four fifths costs a few minutes
+ * of staleness and avoids the block rather than reacting to it.
+ */
+export const SOFT_LIMIT_PCT = 80;
+
+/** How long to stand down when we stop ourselves, absent a stated reset. */
+const SOFT_COOLDOWN_MS = 5 * 60 * 1000;
 
 /**
  * How long a DB answer is trusted before being read again.
@@ -72,20 +111,45 @@ export async function noteRateLimited(
   windowMs?: number
 ): Promise<void> {
   if (!accountId) return;
-  // Meta's own estimate when it gave one, never shorter than the minimum and
-  // never longer than the cap. A flat guess was the reason an account that
-  // needed an hour got poked every five minutes and never recovered.
-  const wait = Math.min(MAX_COOLDOWN_MS, Math.max(COOLDOWN_MS, windowMs ?? 0));
-  const until = Date.now() + wait;
-  memo.set(accountId, { until, checkedAt: Date.now() });
+  const now = Date.now();
+
+  // How many windows in a row this account has failed to recover from. Read
+  // before writing, because the answer changes how long to wait — one extra
+  // indexed read on a request that has already failed.
+  let strikes = 1;
+  try {
+    const rows = await db
+      .select({ until: metaCooldowns.until, strikes: metaCooldowns.strikes })
+      .from(metaCooldowns)
+      .where(eq(metaCooldowns.accountId, accountId))
+      .limit(1);
+    const prior = rows[0];
+    if (prior) {
+      const endedAgo = now - prior.until.getTime();
+      // Still inside the last window, or only just out of it: the last window
+      // was not long enough. Anything older is a fresh incident.
+      if (endedAgo < ESCALATION_WINDOW_MS) strikes = Math.min(prior.strikes + 1, 8);
+    }
+  } catch {
+    /* no history is the same as a first strike */
+  }
+
+  // Meta's own estimate when it gave one — that figure gets the long ceiling,
+  // because it is an answer rather than a guess. Absent one, back off by
+  // doubling from the minimum, under the short ceiling.
+  const stated = windowMs && windowMs > 0 ? Math.min(windowMs, MAX_META_MS) : 0;
+  const guessed = Math.min(COOLDOWN_MS * 2 ** (strikes - 1), MAX_GUESS_MS);
+  const wait = Math.max(COOLDOWN_MS, stated, guessed);
+  const until = now + wait;
+  memo.set(accountId, { until, checkedAt: now });
 
   // AWAITED, not fire-and-forget. On Vercel the function can be frozen as soon
   // as the response is sent, so a floating promise here often never reached
-  // Postgres - the breaker recorded nothing in production while working
+  // Postgres — the breaker recorded nothing in production while working
   // perfectly in development.
   await db
     .insert(metaCooldowns)
-    .values({ accountId, until: new Date(until), reason: reason ?? null, noticedAt: new Date() })
+    .values({ accountId, until: new Date(until), reason: reason ?? null, strikes, noticedAt: new Date() })
     .onConflictDoUpdate({
       target: metaCooldowns.accountId,
       // Extend, never shorten: a second rate limit while cooling off means the
@@ -93,6 +157,53 @@ export async function noteRateLimited(
       set: {
         until: sql`GREATEST(${metaCooldowns.until}, EXCLUDED.until)`,
         reason: reason ?? null,
+        strikes: sql`GREATEST(${metaCooldowns.strikes}, EXCLUDED.strikes)`,
+        noticedAt: new Date(),
+      },
+    })
+    .catch(() => {
+      /* best effort — see above */
+    });
+}
+
+/**
+ * Stand down because Meta says we are close to the limit, not because we hit it.
+ *
+ * Called from the response path on SUCCESSFUL calls. Deliberately does NOT
+ * count as a strike: nothing went wrong, and escalating on a voluntary pause
+ * would punish the app for behaving well. It also never shortens an existing
+ * window, so a real rate limit always wins.
+ */
+export async function noteApproachingLimit(
+  accountId: string | null,
+  percent: number,
+  resetSeconds?: number
+): Promise<void> {
+  if (!accountId) return;
+  const wait = Math.max(SOFT_COOLDOWN_MS, (resetSeconds ?? 0) * 1000);
+  const until = Date.now() + wait;
+
+  const existing = memo.get(accountId);
+  if (!existing || existing.until < until) memo.set(accountId, { until, checkedAt: Date.now() });
+
+  await db
+    .insert(metaCooldowns)
+    .values({
+      accountId,
+      until: new Date(until),
+      reason:
+        `Cruise stopped calling this account on its own: Meta reported ${Math.round(percent)}% of its per-account ` +
+        `allowance used. Nothing is broken and nothing was refused — this is the pause that stops a refusal.`,
+      strikes: 0,
+      noticedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: metaCooldowns.accountId,
+      set: {
+        until: sql`GREATEST(${metaCooldowns.until}, EXCLUDED.until)`,
+        // A voluntary pause must not overwrite the explanation of a real one,
+        // nor reset the strike count that is holding a long window open.
+        reason: sql`CASE WHEN ${metaCooldowns.until} > now() THEN ${metaCooldowns.reason} ELSE EXCLUDED.reason END`,
         noticedAt: new Date(),
       },
     })

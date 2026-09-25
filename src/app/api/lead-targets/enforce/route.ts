@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireEditor, requireSession } from "@/lib/api-auth";
-import { autoPauseEnabled, enforceLimits, readPauseLog } from "@/lib/meta/enforce";
+import { requireAccount, requireEditor } from "@/lib/api-auth";
+import {
+  autoPauseEnabled,
+  autoResumeEnabled,
+  enforceLimits,
+  readPauseLog,
+  readResumeLog,
+} from "@/lib/meta/enforce";
 import { listAllAccounts } from "@/lib/accounts";
 import { withAccountCredential } from "@/lib/meta/credentials";
 
@@ -16,10 +22,19 @@ import { withAccountCredential } from "@/lib/meta/credentials";
  * can look up later is indistinguishable from a bug.
  */
 
-export async function GET() {
-  const { error } = await requireSession();
+export async function GET(req: Request) {
+  // Scoped to the SELECTED account, not to every account the install can see.
+  // An unscoped history put one business's paused cities on another business's
+  // screen, which is the same class of mistake as an unscoped metric: it is not
+  // wrong data, it is somebody else's data.
+  const { account, error } = await requireAccount(req);
   if (error) return error;
-  return NextResponse.json({ enabled: autoPauseEnabled(), log: await readPauseLog(50) });
+  return NextResponse.json({
+    enabled: autoPauseEnabled(),
+    resumeEnabled: autoResumeEnabled(),
+    log: await readPauseLog(50, account.id),
+    resumeLog: await readResumeLog(50, account.id),
+  });
 }
 
 export async function POST(req: Request) {
@@ -69,6 +84,12 @@ export async function POST(req: Request) {
     })),
     // The single-account shape the existing screen reads, kept so the Lead
     // targets page keeps working while there is one account.
-    ...(runs[0] ?? { ran: false, skipped: "No connected account has a lead-target sheet.", paused: [], refused: [] }),
+    ...(runs[0] ?? {
+      ran: false,
+      skipped: "No connected account has a lead-target sheet.",
+      paused: [],
+      resumed: [],
+      refused: [],
+    }),
   });
 }

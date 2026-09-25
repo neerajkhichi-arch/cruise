@@ -29,6 +29,7 @@ import { resolveCityGeo } from "./geo";
 import { translateObjective } from "./objectives";
 import { completeTargeting } from "./targeting";
 import { readTargetLocations } from "./city-leads";
+import { getAllAdSets } from "./adsets";
 import type { CityRow } from "../csv/city-list";
 
 export interface ResolvedCity extends CityRow {
@@ -172,17 +173,20 @@ export async function listUpdatableCampaigns(adAccountId: string): Promise<Campa
         }
       )
     ),
-    cached(`adsets-targeting:${adAccountId}`, TTL.structure, () =>
-      pageAll<RawAdSet>(actPath(adAccountId, "adsets"), {
-        fields: "id,name,status,campaign_id,daily_budget,targeting{geo_locations}",
-        effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
-        limit: "200",
-      })
-    ),
+    // The FOURTH sweep of /adsets, until now. It escaped the consolidation
+    // because it asked for a narrower field list and filtered to active and
+    // paused — but the field list is a subset of the shared one, and the filter
+    // is applied below just as well. A narrower sweep of its own is still a
+    // whole extra pass over the same edge, on an account that spends its days
+    // rate-limited; sharing a warm read beats owning a cold one.
+    getAllAdSets<RawAdSet>(adAccountId),
   ]);
 
   const byCampaign = new Map<string, AdSetSummary[]>();
   for (const a of adSets) {
+    // What the effective_status filter used to do. Archived ad sets cannot be
+    // added to and would only lengthen a picker nobody can already use.
+    if (a.status !== "ACTIVE" && a.status !== "PAUSED") continue;
     const geo = (a.targeting as { geo_locations?: Parameters<typeof readTargetLocations>[0] } | undefined)
       ?.geo_locations;
     const places = readTargetLocations(geo);

@@ -56,6 +56,14 @@ const BUDGET_HEADERS = [
   "budget cap",
   "cap",
 ];
+/**
+ * A sheet that splits one combined budget across channels (e.g. a "Monthly
+ * Budget" total alongside a per-channel "Meta" column) must be read from the
+ * Meta-specific column, not the total — this app only ever talks to Meta, and
+ * using the combined total as the spend ceiling would let a city's Meta spend
+ * run into the share meant for Google before enforcement ever triggers.
+ */
+const META_BUDGET_HEADERS = ["meta", "meta budget", "metabudget", "meta spend", "meta monthly budget"];
 const TARGET_HEADERS = [
   "target",
   "leadtarget",
@@ -160,7 +168,12 @@ export function parseLeadTargets(csv: string): { targets: LeadTarget[]; problems
   const targetCol = headers.findIndex((h) => TARGET_HEADERS.includes(h));
   // Budget is optional: a sheet with only City and Target still works, and the
   // cities without one simply have no spend ceiling.
-  const budgetCol = headers.findIndex((h) => BUDGET_HEADERS.includes(h));
+  //
+  // A Meta-specific column, when the sheet has one, wins over a generic
+  // "budget"/"monthly budget"/"spend" column — see META_BUDGET_HEADERS above.
+  const metaBudgetCol = headers.findIndex((h) => META_BUDGET_HEADERS.includes(h));
+  const genericBudgetCol = headers.findIndex((h) => BUDGET_HEADERS.includes(h));
+  const budgetCol = metaBudgetCol !== -1 ? metaBudgetCol : genericBudgetCol;
 
   if (cityCol === -1 || (targetCol === -1 && budgetCol === -1)) {
     return {

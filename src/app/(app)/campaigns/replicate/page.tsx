@@ -24,6 +24,7 @@ import {
   CircleAlert,
   Copy,
   Plus,
+  Search,
   Send,
   X,
 } from "lucide-react";
@@ -55,6 +56,7 @@ export default function ReplicatePage() {
 
   const [step, setStep] = useState(0);
   const [sourceId, setSourceId] = useState("");
+  const [sourceSearch, setSourceSearch] = useState("");
   const [cityInput, setCityInput] = useState("");
   const [cityNames, setCityNames] = useState<string[]>([]);
   const [manualStates, setManualStates] = useState<Record<string, string>>({});
@@ -133,6 +135,18 @@ export default function ReplicatePage() {
   const [result, setResult] = useState<any>(null);
 
   const source = ctx?.sources.find((s) => s.campaignId === sourceId) ?? null;
+
+  // Narrows the source list by name or city. The list runs into the
+  // hundreds once dormant history campaigns are included, so scanning it by
+  // eye stops working well before that.
+  const filteredSources = useMemo(() => {
+    if (!ctx) return [];
+    const q = sourceSearch.trim().toLowerCase();
+    if (!q) return ctx.sources;
+    return ctx.sources.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.cities.some((c) => c.toLowerCase().includes(q))
+    );
+  }, [ctx, sourceSearch]);
   const dailyBudget = budgetOverride ?? source?.dailyBudget ?? 0;
   const ceiling = ceilingOverride ?? source?.targetCpl ?? 0;
 
@@ -530,8 +544,24 @@ export default function ReplicatePage() {
               Its ad set structure, targeting, budget and ceiling become the template. Geo and the product set are the
               two things replaced per city.
             </p>
+            <div className="relative mb-3">
+              <Search className="h-4 w-4 text-ink-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                className="input !pl-9"
+                value={sourceSearch}
+                onChange={(e) => setSourceSearch(e.target.value)}
+                placeholder="Search by campaign name or city…"
+              />
+
+            </div>
+
+            {ctx && filteredSources.length === 0 && (
+              <p className="text-sm text-ink-500 py-6 text-center">No campaigns match &quot;{sourceSearch}&quot;.</p>
+
+            )}
+
             <div className="space-y-2">
-              {ctx?.sources.map((s) => (
+              {filteredSources.map((s) => (
                 <button
                   key={s.campaignId}
                   onClick={() => setSourceId(s.campaignId)}
